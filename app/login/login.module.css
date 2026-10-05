@@ -1,0 +1,140 @@
+.shell {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 20px 28px;
+  background: radial-gradient(ellipse at 50% 0, #32253f 0%, transparent 56%), var(--background);
+}
+
+.card {
+  width: 100%;
+  max-width: 452px;
+  padding: 38px;
+  border: 1px solid #46384e;
+  border-radius: 18px;
+  background: linear-gradient(150deg, #211b28, #19171d 75%);
+  box-shadow: 0 24px 80px #0003;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 40px;
+}
+
+.brand strong {
+  display: block;
+  color: var(--foreground);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  line-height: 1.25;
+}
+
+.brand div > span {
+  display: block;
+  margin-top: 4px;
+  color: #a79aac;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+}
+
+.eyebrow {
+  display: block;
+  margin-bottom: 9px;
+  color: #b29bc8;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+}
+
+.card h1 {
+  font-size: 27px;
+}
+
+.intro {
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.9;
+}
+
+.form {
+  margin-top: 29px;
+}
+
+.form input {
+  min-height: 46px !important;
+}
+
+.passwordField {
+  position: relative;
+}
+
+.passwordField input {
+  padding-right: 48px !important;
+}
+
+.toggle {
+  position: absolute;
+  inset: 0 5px 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  margin: 0;
+  color: #ad99bb;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+}
+
+.toggle:hover {
+  color: #dfc5f6;
+}
+
+.submit {
+  width: 100%;
+  min-height: 46px;
+  margin-top: 27px;
+}
+
+.error {
+  margin-top: 17px;
+  padding: 11px 13px;
+  border: 1px solid #744050;
+  border-radius: 8px;
+  color: #f0a3b2;
+  background: #341c26;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.help {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 24px;
+  padding-top: 21px;
+  border-top: 1px solid #342a3c;
+  color: #a091a9;
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.footer {
+  margin-top: 25px;
+  color: #85798e;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+@media (max-width: 480px) {
+  .shell { padding: 25px 17px; }
+  .card { padding: 30px 25px; }
+  .brand { margin-bottom: 34px; }
+  .help { align-items: flex-start; text-align: center; }
+  .help svg { margin-top: 3px; }
+}

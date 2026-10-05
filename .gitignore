@@ -1,0 +1,16 @@
+node_modules/
+.pnpm-store/
+work/
+.next/
+data/
+.env
+.env.*
+!.env.example
+outputs/
+*.sqlite
+*.sqlite-*
+# Unused legacy font; the licensed rounded fonts are bundled instead.
+public/fonts/ChineseSans.ttf
+*.tsbuildinfo
+*.log
+.DS_Store

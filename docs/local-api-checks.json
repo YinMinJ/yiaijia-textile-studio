@@ -1,0 +1,13 @@
+{
+  "anonymous_blocked": true,
+  "create_status": 200,
+  "owner_reads_project": true,
+  "other_owner_cannot_read": true,
+  "other_owner_cannot_overwrite": true,
+  "unsafe_url_blocked": true,
+  "encrypted_setting_save_status": 200,
+  "settings_masked": true,
+  "upload_status": 200,
+  "owner_reads_image": true,
+  "other_owner_cannot_read_image": true
+}

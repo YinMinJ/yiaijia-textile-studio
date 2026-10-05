@@ -1,0 +1,14 @@
+Resource Han Rounded CN (资源圆体) 0.990
+
+Upstream: https://github.com/CyanoHao/Resource-Han-Rounded
+Release: https://github.com/CyanoHao/Resource-Han-Rounded/releases/tag/v0.990
+Archive: RHR-CN-0.990.7z
+
+Copyright 2018–2019 Cyano Hao.
+Portions Copyright 2014, 2015, 2018 Adobe, with Reserved Font Name 'Source'.
+Licensed under SIL Open Font License 1.1; see ResourceHanRounded-LICENSE.txt.
+
+Regular (400), Medium (500), and Bold (700) were converted from the upstream
+TrueType files to WOFF2 with fontTools 4.60.1 and Brotli 1.2.0. Glyph coverage,
+outlines, font names and copyright metadata are retained; no subsetting.
+These are bundled app assets, not fonts installed into the operating system.
