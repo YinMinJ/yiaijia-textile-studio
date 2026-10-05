@@ -8,7 +8,7 @@
 
 ```powershell
 pnpm install --frozen-lockfile
-pnpm setup
+pnpm run setup
 pnpm build
 pnpm start
 ```
