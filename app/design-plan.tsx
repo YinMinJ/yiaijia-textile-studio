@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowDown, ArrowUp, Sparkles, ArrowRight, LoaderCircle, Undo2 } from "lucide-react";
-import { categoryFor, modulePurpose, moduleSection, sourceAsset, usesSecondary, type Project, type DesignModule } from "@/lib/design-model";
+import { categoryFor, modulePurpose, moduleSection, sourceAsset, updatePlanModule, usesSecondary, type Project, type DesignModule } from "@/lib/design-model";
 
 export default function DesignPlan({ project, onChange, onPreview, onReview, onGenerateCopy, onUndoCopy, copyResult, busy, copyBusy }: {
   project: Project;
@@ -18,7 +18,7 @@ export default function DesignPlan({ project, onChange, onPreview, onReview, onG
   const category = categoryFor(project);
   const hasCompletedLayout = project.workflow === "complete" || (!project.workflow && project.status === "ready");
   function edit(id: string, changes: Partial<DesignModule>) {
-    onChange({ ...project, workflow: changes.imageId !== undefined || changes.imageId2 !== undefined ? "plan" : project.workflow, modules: project.modules.map((m) => m.id === id ? { ...m, ...changes } : m) });
+    onChange(updatePlanModule(project, id, changes));
   }
   function move(id: string, delta: number) {
     const modules = [...project.modules];
@@ -27,7 +27,7 @@ export default function DesignPlan({ project, onChange, onPreview, onReview, onG
     if (!modules[to] || modules[to].kind !== modules[from].kind || moduleSection(modules[to]) === "hero") return;
     [modules[from], modules[to]] = [modules[to], modules[from]];
     const count = { main: 0, detail: 0 };
-    onChange({ ...project, workflow: "plan", modules: modules.map((m) => ({ ...m, index: ++count[m.kind] })) });
+    onChange({ ...project, modules: modules.map((m) => ({ ...m, index: ++count[m.kind] })) });
   }
   const missing = [!project.info.material && "面料成分", !project.info.size && "尺寸规格", !project.info.care && "洗护说明", category.id === "quilt" ? !project.info.filling && "填充物" : !project.info.setContents && "套件组成"].filter(Boolean);
   return <section className="design-plan">
@@ -66,10 +66,10 @@ export default function DesignPlan({ project, onChange, onPreview, onReview, onG
           <div className="plan-source">
             {factsOnly ? <div className="plan-info-card"><b>{moduleSection(m) === "specs" ? "真实参数" : "选购与洗护"}</b><span>{moduleSection(m) === "specs" ? "使用已填写的商品资料" : project.info.care || "可在商品资料中填写洗护标识内容"}</span></div> : <>
               {a && <img src={a.url} alt={`${modulePurpose(m)}选用的实拍：${a.name}`} />}
-              <label>用哪张实拍证明<select aria-label={`${modulePurpose(m)}的原始实拍`} value={a?.id || ""} onChange={(e) => edit(m.id, { sourceImageId: e.target.value, imageId: e.target.value, aiStatus: undefined, aiError: undefined })}>
+              <label>用哪张实拍证明<select aria-label={`${modulePurpose(m)}的原始实拍`} value={a?.id || ""} onChange={(e) => edit(m.id, { imageId: e.target.value })}>
                 <option value="" disabled>请选择原始实拍</option>{originals.map((asset) => <option key={asset.id} value={asset.id}>{asset.role} · {asset.name}</option>)}
               </select></label>
-              {usesSecondary(m) && <label>{section === "components" ? "另一件的实拍" : "第二张配色实拍"}<select aria-label={`${modulePurpose(m)}的第二张实拍`} value={m.sourceImageId2 || m.imageId2} onChange={(e) => edit(m.id, { sourceImageId2: e.target.value, imageId2: e.target.value })}><option value="">暂不使用第二张</option>{originals.map((asset) => <option key={asset.id} value={asset.id}>{asset.role} · {asset.name}</option>)}</select></label>}
+              {usesSecondary(m) && <label>{section === "components" ? "另一件的实拍" : "第二张配色实拍"}<select aria-label={`${modulePurpose(m)}的第二张实拍`} value={m.sourceImageId2 || m.imageId2} onChange={(e) => edit(m.id, { imageId2: e.target.value })}><option value="">暂不使用第二张</option>{originals.map((asset) => <option key={asset.id} value={asset.id}>{asset.role} · {asset.name}</option>)}</select></label>}
               {photoHint && <small className="plan-source-hint">{photoHint}</small>}
             </>}
           </div>

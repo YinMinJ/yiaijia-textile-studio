@@ -4,6 +4,9 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import ModelSettings from "./model-settings";
 import DesignPlan from "./design-plan";
 import CategoryPicker from "./category-picker";
+import StudioHome from "./studio-home";
+import TemplateLibrary from "./template-library";
+import "./studio-refresh.css";
 import { buildCopyInput, applyGeneratedCopy, preserveHeroCopy, type GeneratedCopy } from "@/lib/design-copy";
 import { zip, unzip, strToU8 } from "fflate";
 import { toast } from "sonner";
@@ -27,9 +30,9 @@ import {
   Grid2X2,
   ChevronRight,
   ImagePlus,
-  Expand,
   BookOpen,
-  Menu,
+  Search,
+  ArrowLeft,
 } from "lucide-react";
 import {
   SidebarProvider,
@@ -75,6 +78,7 @@ import {
   prepareImageRun,
   categoryFor,
   switchCategory,
+  updateProjectTemplate,
   type ProductCategory,
   type Project,
   type ProductInfo,
@@ -90,7 +94,6 @@ const categoryRoles: Record<ProductCategory, AssetRole[]> = {
   quilt: ["整体", "叠放", "填充", "细节", "工艺", "颜色", "其他"],
   "bedding-set": ["整体", "被套", "床单", "枕套", "细节", "工艺", "颜色", "其他"],
 };
-const sample = sampleProject();
 function CanvasPreview({
   project,
   module,
@@ -312,6 +315,10 @@ async function prepareImage(file: File) {
 
 export default function Studio({ signedIn }: { signedIn: boolean }) {
   const [view, setView] = useState<View>("home");
+  const [pendingSwitch, setPendingSwitch] = useState<(() => void) | null>(null);
+  const [workSearch, setWorkSearch] = useState("");
+  const [workFilter, setWorkFilter] = useState<"all" | "main" | "detail">("all");
+  const [workCategory, setWorkCategory] = useState<"all" | ProductCategory>("all");
   const [project, setProject] = useState<Project | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [newOpen, setNewOpen] = useState(false);
@@ -395,6 +402,40 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
     setProject(p);
     setDirty(true);
   }
+  function requestProjectSwitch(action: () => void) {
+    if (busy || generationRunning.current || copyRunning.current) {
+      toast.info("当前任务正在处理中，完成后即可切换商品。");
+      return;
+    }
+    if (current.current && dirtyRef.current) setPendingSwitch(() => action);
+    else action();
+  }
+  function openProject(p: Project) {
+    if (current.current?.id === p.id) {
+      setView("editor");
+      return;
+    }
+    requestProjectSwitch(() => {
+      setProject(p);
+      setDirty(false);
+      setEditingId(null);
+      setStep(!p.modules.length ? "materials" : p.workflow === "plan" ? "plan" : "results");
+      setOutputTab(p.output || "main");
+      setView("editor");
+    });
+  }
+  function startCreation(output: "main" | "detail") {
+    if (busy) return;
+    setNewOutput(output);
+    setNewOpen(true);
+  }
+  async function finishProjectSwitch(saveFirst: boolean) {
+    const action = pendingSwitch;
+    if (!action || busy) return;
+    if (saveFirst && !(await save())) return;
+    setPendingSwitch(null);
+    action();
+  }
   async function generateCopy() {
     if (!project || busy || copyRunning.current) return;
     if (!signedIn || !modelConfigured) {
@@ -448,6 +489,7 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
     setCopyResult({ projectId: project.id, message: "已撤销本次自动文案，你后续手动修改的内容已保留。" });
   }
   function openSample(kind: "main" | "detail" = "main") {
+    requestProjectSwitch(() => {
     const p = sampleProject();
     p.output = kind;
     p.generation = "template";
@@ -457,19 +499,20 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
     setStep("plan");
     setOutputTab(kind);
     setDirty(false);
+    });
   }
   function navigate(v: View) {
     setView(v);
   }
   async function save(p = project) {
-    if (!p) return;
+    if (!p) return false;
     if (!signedIn) {
       toast.error("请先登录后保存作品。");
-      return;
+      return false;
     }
     if (!p.info.name.trim()) {
       toast.error("请先填写商品名称。");
-      return;
+      return false;
     }
     setBusy("正在保存作品");
     try {
@@ -499,14 +542,18 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
       ]);
       setDirty(false);
       toast.success("作品已保存，下次可以继续编辑。");
+      return true;
     } catch (e) {
       toast.error((e as Error).message);
+      return false;
     } finally {
       setBusy("");
     }
   }
   function createProject() {
-    if (!newName.trim()) return;
+    if (!newName.trim() || busy) return;
+    setNewOpen(false);
+    requestProjectSwitch(() => {
     const p = freshProject();
     p.category = newCategory;
     p.info.name = newName.trim();
@@ -519,6 +566,7 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
     setOutputTab(newOutput);
     setView("editor");
     setDirty(true);
+    });
   }
   function updateInfo(key: keyof ProductInfo, value: string) {
     if (project)
@@ -721,15 +769,8 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
       toast.error("请填写商品名称。");
       return;
     }
-    if (project.assets.filter((a) => !a.generated).length < 5) {
-      toast.error("请至少准备5张商品素材，也可以先试用被子样例。");
-      return;
-    }
-    if (
-      !project.assets.some((a) => !a.generated && ["整体", "叠放", "被套"].includes(a.role)) ||
-      !project.assets.some((a) => !a.generated && ["细节", "填充", "工艺", "枕套", "床单"].includes(a.role))
-    ) {
-      toast.error("请标记至少1张整体实拍和1张细节、工艺或部件实拍。");
+    if (!project.assets.some((a) => !a.generated)) {
+      toast.error("先上传至少 1 张商品实拍，就可以开始制作。");
       return;
     }
     const original = { ...project };
@@ -786,9 +827,12 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
   }
   function selectTemplate(id: TemplateId) {
     if (project) {
-      patchProject({ ...project, template: id, modules: preserveHeroCopy(project, makeModules({ ...project, template: id })), workflow: "plan" });
+      const next = updateProjectTemplate(project, id);
+      if (next !== project) {
+        patchProject(next);
+        setStep(next.modules.length ? "plan" : "materials");
+      }
       setView("editor");
-      setStep(project.modules.length ? "plan" : "materials");
     } else {
       const p = sampleProject();
       p.template = id;
@@ -801,6 +845,34 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
       setStep("plan");
       setDirty(false);
     }
+  }
+  function useLibraryTemplate(template: TemplateId, category: ProductCategory, output: "main" | "detail") {
+    if (busy) return;
+    if (project && categoryFor(project).id === category && (project.output || "main") === output) {
+      selectTemplate(template);
+    } else {
+      requestProjectSwitch(() => {
+      const next = freshProject();
+      next.template = template;
+      next.category = category;
+      next.output = output;
+      setProject(next);
+      setDirty(true);
+      setStep("materials");
+      setOutputTab(output);
+      setView("editor");
+      setEditingId(null);
+      });
+    }
+  }
+  function removeProjectAsset(asset: Asset) {
+    if (!project || busy) return;
+    const references = project.modules.filter(m => [m.imageId, m.imageId2, m.sourceImageId, m.sourceImageId2].includes(asset.id));
+    if (references.length) {
+      toast.info("这张素材已用于内容计划，请先更换对应图片，再移除素材。现有文案和成图已保留。");
+      return;
+    }
+    patchProject({ ...project, assets: project.assets.filter(a => a.id !== asset.id) });
   }
   function updateModule(changes: Partial<DesignModule>) {
     if (project) {
@@ -997,8 +1069,21 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
     project.generation === "ai" &&
     project.modules.some((m) => needsAI(project, m) && m.aiStatus !== "succeeded");
   const savedAssets = projects
-    .flatMap((p) => p.assets.map((a) => ({ ...a, projectName: p.info.name })))
+    .flatMap((p) => p.assets.filter(a => !a.generated).map((a) => ({ ...a, projectName: p.info.name })))
     .filter((a, i, arr) => arr.findIndex((b) => b.id === a.id) === i);
+  const filteredProjects = projects.filter(p =>
+    (!workSearch.trim() || `${p.info.name} ${p.info.brand}`.toLocaleLowerCase().includes(workSearch.trim().toLocaleLowerCase())) &&
+    (workFilter === "all" || p.output === workFilter || (!p.output && p.modules.some(m => m.kind === workFilter))) &&
+    (workCategory === "all" || categoryFor(p).id === workCategory)
+  );
+  function workStatus(p: Project) {
+    if (!p.modules.length) return "待完善资料";
+    if (p.workflow === "plan") return "待确认计划";
+    if (p.modules.some(m => m.aiStatus === "failed")) return "部分图片需重试";
+    if (p.workflow === "preview") return "待确认首图";
+    if (p.generation === "ai" && p.modules.some(m => needsAI(p, m) && m.aiStatus !== "succeeded")) return "图片待生成";
+    return p.workflow === "complete" || p.status === "ready" ? "已完成排版" : "继续制作";
+  }
   return (
     <SidebarProvider
       style={{ "--sidebar-width": "208px" } as React.CSSProperties}
@@ -1020,7 +1105,8 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
           </button>
           <button
             className="btn primary sidebar-new"
-            onClick={() => setNewOpen(true)}
+            onClick={() => startCreation("main")}
+            disabled={!!busy}
           >
             <Plus size={17} />
             新建商品
@@ -1032,7 +1118,9 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
             {(
               [
                 { id: "home", icon: LayoutDashboard, label: "创作工作台" },
+                { id: "templates", icon: PanelsTopLeft, label: "风格模板" },
                 { id: "works", icon: FolderOpen, label: "我的作品" },
+                { id: "assets", icon: Images, label: "商品素材" },
                 { id: "settings", icon: Settings2, label: "自定义 API" },
               ] as const
             ).map((n) => (
@@ -1051,18 +1139,6 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
               </SidebarMenuItem>
             ))}
           </SidebarMenu>
-          <div className="sidebar-note">
-            <span>为家纺上新准备</span>
-            <p>
-              主图或详情
-              <br />
-              按需独立制作
-            </p>
-            <div className="mini-dimensions">
-              <span>1200²</span>
-              <span>790</span>
-            </div>
-          </div>
         </SidebarContent>
         <SidebarFooter>
           <button className="help-button" onClick={() => setHelpOpen(true)}>
@@ -1073,7 +1149,7 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
             <div className="avatar">宜</div>
             <div>
               <b>宜爱家工作台</b>
-              <small>商品设计 · 试用版</small>
+              <small>商品设计 · 本地创作</small>
             </div>
           </div>
         </SidebarFooter>
@@ -1085,6 +1161,7 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
             <span>{titles[view]}</span>
           </div>
           <div className="topbar-right">
+            {project && view !== "editor" && <button className="text-button return-editor" onClick={() => setView("editor")}><ArrowLeft size={14} />继续当前作品{dirty ? " · 未保存" : ""}</button>}
             <button
               className="settings-top-hint"
               onClick={() => setView("settings")}
@@ -1092,7 +1169,7 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
               <Settings2 size={14} />
               {modelConfigured ? "API 已配置" : "配置自定义 API"}
             </button>
-            <span className="trial-badge">首版体验</span>
+            <span className="trial-badge">本地工作台</span>
             <button
               className="icon-button"
               aria-label="使用帮助"
@@ -1132,248 +1209,43 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
             </button>
           </div>
         )}
-        {view === "home" && (
-          <main className="page home-page">
-            <div className="section-heading">
-              <div>
-                <span className="eyebrow">DESIGNED FOR HOME TEXTILES</span>
-                <h1>今天，上新什么好物？</h1>
-                <p>先定卖点与选图，再确认首图，完成店铺风格套图。</p>
-              </div>
-              <span className="date-label">主图 1200 × 1200 · 详情宽 790</span>
-            </div>
-            <div className="start-grid">
-              <section className="create-panel">
-                <div className="panel-eyebrow">
-                  <Sparkles size={17} />
-                  商品套图
-                </div>
-                <h2>先讲清商品，再做一套好图</h2>
-                <p>新增宜爱家店铺风格 · 大图呈现，卖点分层。</p>
-                <div
-                  className="output-choice"
-                  role="group"
-                  aria-label="制作类型"
-                >
-                  <button
-                    className={newOutput === "main" ? "active" : ""}
-                    aria-pressed={newOutput === "main"}
-                    onClick={() => setNewOutput("main")}
-                  >
-                    <Grid2X2 size={16} />
-                    电商主图 · 5张
-                  </button>
-                  <button
-                    className={newOutput === "detail" ? "active" : ""}
-                    aria-pressed={newOutput === "detail"}
-                    onClick={() => setNewOutput("detail")}
-                  >
-                    <BookOpen size={16} />
-                    详情页 · 宽790
-                  </button>
-                </div>
-                <button
-                  className="home-upload"
-                  onClick={() => setNewOpen(true)}
-                >
-                  <span className="upload-emblem">
-                    <Upload size={26} />
-                  </span>
-                  <b>上传商品素材，开始创作</b>
-                  <span>JPG / PNG / WebP / ZIP</span>
-                </button>
-                <div className="create-panel-footer">
-                  <span>
-                    <Check size={14} />
-                    基于商品实拍制作
-                  </span>
-                  <span>
-                    <Check size={14} />
-                    文字、图片随时可改
-                  </span>
-                </div>
-              </section>
-              <button
-                className="example-feature"
-                onClick={() => openSample(newOutput)}
-              >
-                <img src="/samples/00224.jpg" alt="宜爱家米白格纹绗缝被实拍" />
-                <span className="example-tag">用真实商品试一试</span>
-                <div className="example-caption">
-                  <div>
-                    <span>宜爱家 · 被子套图</span>
-                    <h3>立体格纹绗缝被</h3>
-                    <p>主图 / 详情 · 独立制作</p>
-                  </div>
-                  <span className="example-open">
-                    <Expand size={18} />
-                  </span>
-                </div>
-              </button>
-            </div>
-            <section className="recent-section">
-              <div className="section-line">
-                <h2>最近作品</h2>
-                <button
-                  className="text-button"
-                  onClick={() => setView("works")}
-                >
-                  全部作品
-                </button>
-              </div>
-              {projects.length > 0 ? (
-                <div className="recent-list">
-                  {projects.slice(0, 3).map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => {
-                        setProject(p);
-                        setDirty(false);
-                        setStep(!p.modules.length ? "materials" : p.workflow === "plan" ? "plan" : "results");
-                        setOutputTab(p.output || "main");
-                        setView("editor");
-                      }}
-                    >
-                      <img
-                        src={p.assets[0]?.url || "/samples/00224.jpg"}
-                        alt=""
-                      />
-                      <span>
-                        <b>{p.info.name}</b>
-                        <small>
-                          {p.modules.length
-                            ? p.modules.length + " 张 · 已排版"
-                            : "草稿 · 继续制作"}
-                        </small>
-                      </span>
-                      <ChevronRight size={18} />
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="recent-empty">
-                  <FolderOpen size={20} />
-                  <span>你的第一款作品，会从这里开始。</span>
-                  <button
-                    className="text-button"
-                    onClick={() => openSample(newOutput)}
-                  >
-                    先体验被子样例
-                  </button>
-                </div>
-              )}
-            </section>
-          </main>
-        )}
+        {view === "home" && <StudioHome
+          projects={projects} currentProject={project} dirty={dirty} busy={!!busy}
+          historyLoading={historyLoading} historyError={historyError}
+          onCreate={startCreation} onTemplates={() => setView("templates")}
+          onOpen={openProject} onResume={() => setView("editor")} onSample={openSample}
+          onRetry={() => void loadProjects()} onAllWorks={() => setView("works")}
+        />}
         {view === "settings" && (
           <ModelSettings signedIn={signedIn} onSaved={setModelConfigured} />
         )}
-        {view === "templates" && (
-          <main className="page">
-            <div className="section-heading">
-              <div>
-                <span className="eyebrow">TEMPLATE COLLECTION</span>
-                <h1>找到适合商品的表达</h1>
-                <p>同一款商品，三种版式氛围。选择后即可编辑。</p>
-              </div>
-              <span className="pill">4 套家纺模板</span>
-            </div>
-            <div className="template-grid">
-              {templates.map((t) => (
-                <TemplateCard
-                  key={t.id}
-                  id={t.id}
-                  onSelect={() => selectTemplate(t.id)}
-                  selected={project?.template === t.id}
-                />
-              ))}
-            </div>
-            <div className="soft-note">
-              <Layers size={19} />
-              <span>
-                每套模板均包含 5 张主图与 7 张详情切片，保留独立文字与图片编辑。
-              </span>
-            </div>
-          </main>
-        )}
+        {view === "templates" && <TemplateLibrary currentProject={project} busy={!!busy} onUse={useLibraryTemplate} />}
         {view === "works" && (
           <main className="page">
             <div className="section-heading">
-              <div>
-                <h1>我的作品</h1>
-                <p>保存每一次上新，下次接着做。</p>
-              </div>
-              <button className="btn primary" onClick={() => setNewOpen(true)}>
-                <Plus size={17} />
-                新建商品
-              </button>
+              <div><span className="eyebrow">MY COLLECTION</span><h1>我的作品</h1><p>保存每一次上新，下次接着做。</p></div>
+              <button className="btn primary" disabled={!!busy} onClick={() => startCreation("main")}><Plus size={17} />新建商品</button>
             </div>
-            {historyLoading ? (
-              <div className="empty-state">
-                <LoaderCircle className="spin" />
-                正在读取作品
+            <div className="work-toolbar">
+              <label className="work-search"><Search size={18} /><input aria-label="搜索作品" value={workSearch} onChange={e => setWorkSearch(e.target.value)} placeholder="搜索商品名称或品牌" /></label>
+              <div className="work-filter-row">
+                <div className="work-filter" role="group" aria-label="按图片用途筛选">
+                  {([['all','全部作品'],['main','商品主图'],['detail','商品详情']] as const).map(([value,label]) => <button key={value} aria-pressed={workFilter === value} onClick={() => setWorkFilter(value)}>{label}</button>)}
+                </div>
+                <div className="work-category"><Select value={workCategory} onValueChange={v => setWorkCategory(v as typeof workCategory)}><SelectTrigger aria-label="按商品类目筛选"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部类目</SelectItem><SelectItem value="quilt">被子</SelectItem><SelectItem value="bedding-set">床上套件</SelectItem></SelectContent></Select></div>
+                <span className="muted">{filteredProjects.length} 个作品</span>
               </div>
-            ) : historyError ? (
-              <Empty
-                title="作品暂时无法读取"
-                text={historyError}
-                action={
-                  <button className="btn" onClick={() => void loadProjects()}>
-                    重试
-                  </button>
-                }
-              />
-            ) : projects.length ? (
-              <div className="works-grid">
-                {projects.map((p) => (
-                  <button
-                    className="work-card"
-                    key={p.id}
-                    onClick={() => {
-                      setProject(p);
-                      setDirty(false);
-                      setStep(!p.modules.length ? "materials" : p.workflow === "plan" ? "plan" : "results");
-                      setOutputTab(p.output || "main");
-                      setView("editor");
-                    }}
-                  >
-                    <div className="work-art">
-                      {p.modules[0] ? (
-                        <CanvasPreview project={p} module={p.modules[0]} />
-                      ) : p.assets[0] ? (
-                        <img src={p.assets[0].url} alt={p.info.name} />
-                      ) : (
-                        <FileImage size={40} />
-                      )}
-                    </div>
-                    <div>
-                      <h3>{p.info.name}</h3>
-                      <p>
-                        {p.modules.length
-                          ? p.modules.length + " 张图片 · 已排版"
-                          : "待完成"}
-                        <span>
-                          {new Date(p.updatedAt).toLocaleDateString("zh-CN")}
-                        </span>
-                      </p>
-                    </div>
-                  </button>
-                ))}
+            </div>
+            {historyLoading ? <div className="empty-state"><LoaderCircle className="spin" />正在读取作品</div>
+              : historyError ? <Empty title="作品暂时无法读取" text={historyError} action={<button className="btn" onClick={() => void loadProjects()}>重试</button>} />
+              : filteredProjects.length ? <div className="works-grid">
+                {filteredProjects.map(p => <button className="work-card" key={p.id} disabled={!!busy} onClick={() => openProject(p)}>
+                  <div className="work-art">{p.modules[0] ? <CanvasPreview project={p} module={p.modules[0]} /> : p.assets[0] ? <img src={p.assets[0].url} alt={p.info.name} /> : <FileImage size={40} />}</div>
+                  <div><h3>{p.info.name}</h3><p>{categoryFor(p).name} · {p.output === "detail" ? "商品详情" : p.output === "main" ? "商品主图" : "主图与详情"}</p><p>{workStatus(p)}<span>{new Date(p.updatedAt).toLocaleDateString("zh-CN")}</span></p></div>
+                </button>)}
               </div>
-            ) : (
-              <Empty
-                title="还没有保存的作品"
-                text="上传一款商品，或打开样例修改后保存。"
-                action={
-                  <button
-                    className="btn primary"
-                    onClick={() => openSample(newOutput)}
-                  >
-                    体验被子样例
-                  </button>
-                }
-              />
-            )}
+              : projects.length ? <Empty title="没有符合条件的作品" text="试试其他商品名称、图片用途或类目。" action={<button className="btn" onClick={() => {setWorkSearch("");setWorkFilter("all");setWorkCategory("all");}}>清除筛选</button>} />
+              : <Empty title="还没有保存的作品" text="上传一款商品，或打开样例修改后保存。" action={<button className="btn primary" disabled={!!busy} onClick={() => openSample("main")}>体验被子样例</button>} />}
           </main>
         )}
         {view === "assets" && (
@@ -1383,7 +1255,7 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
                 <h1>商品素材</h1>
                 <p>已保存项目中的实拍素材，按商品保留。</p>
               </div>
-              <button className="btn primary" onClick={() => setNewOpen(true)}>
+              <button className="btn primary" disabled={!!busy} onClick={() => startCreation("main")}>
                 <ImagePlus size={17} />
                 导入新商品
               </button>
@@ -1409,7 +1281,8 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
                 action={
                   <button
                     className="btn primary"
-                    onClick={() => setNewOpen(true)}
+                    disabled={!!busy}
+                    onClick={() => startCreation("main")}
                   >
                     创建商品项目
                   </button>
@@ -1495,7 +1368,7 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
                       <h2>
                         商品实拍{" "}
                         <span className="muted">
-                          {project.assets.length} / 40
+                          {project.assets.filter(a => !a.generated).length} / 40
                         </span>
                       </h2>
                       <button
@@ -1535,27 +1408,18 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
                       <Upload size={25} />
                       <b>点击选择，或把商品素材拖到这里</b>
                       <span>
-                        支持图片或 ZIP；按当前类目标记整体、细节与部件用途
+                        1 张实拍即可开始 · 支持 JPG / PNG / WebP / ZIP
                       </span>
                     </button>
-                    {project.assets.length > 0 && (
+                    {project.assets.some(a => !a.generated) && (
                       <div className="material-grid">
-                        {project.assets.map((a) => (
+                        {project.assets.filter(a => !a.generated).map((a) => (
                           <div className="material-card" key={a.id}>
                             <img src={a.url} alt={a.name} />
                             <button
                               className="remove-asset"
                               aria-label={"从当前项目移除" + a.name}
-                              onClick={() =>
-                                patchProject({
-                                  ...project,
-                                  assets: project.assets.filter(
-                                    (x) => x.id !== a.id,
-                                  ),
-                                  modules: [],
-                                  status: "draft",
-                                })
-                              }
+                              onClick={() => removeProjectAsset(a)}
                             >
                               <X size={13} />
                             </button>
@@ -1593,7 +1457,7 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
                     <div className="material-tip">
                       <FileImage size={16} />
                       <span>
-                        标记图片用途，排版时会优先放入对应模块。请确认细节图属于当前商品。
+                        建议准备 5 张不同角度的实拍，包含整体与细节；图片较少时会复用。标记用途后，排版会优先匹配对应图片。
                       </span>
                     </div>
                   </section>
@@ -1718,12 +1582,13 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
                   </span>
                   <div>
                     <button
-                      className="btn primary"
+                      className="btn"
                       onClick={() => setStep("template")}
                       disabled={!!busy}
                     >
-                      下一步：确定视觉风格 <ChevronRight size={17} />
+                      选择视觉风格
                     </button>
+                    <button className="btn primary" onClick={() => preparePlan()} disabled={!!busy}>直接制定内容计划 <ChevronRight size={17} /></button>
                   </div>
                 </div>
               </TabsContent>
@@ -1737,7 +1602,7 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
                       id={t.id}
                       selected={project.template === t.id}
                       onSelect={() => {
-                        if (project.template !== t.id) patchProject({ ...project, template: t.id, modules: project.modules.length ? makeModules({ ...project, template: t.id }) : [], workflow: "plan" });
+                        if (project.template !== t.id) patchProject(updateProjectTemplate(project, t.id));
                       }}
                     />
                   ))}
@@ -1925,6 +1790,19 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
           </main>
         )}
       </SidebarInset>
+      <Dialog open={!!pendingSwitch} onOpenChange={open => { if (!open && !busy) setPendingSwitch(null); }}>
+        <DialogContent className="new-dialog">
+          <DialogHeader>
+            <DialogTitle>保留当前修改？</DialogTitle>
+            <DialogDescription>「{project?.info.name || "当前商品"}」有未保存的内容。保存后再切换，下次还能接着编辑。</DialogDescription>
+          </DialogHeader>
+          <div className="pending-dialog-actions">
+            <button className="btn" disabled={!!busy} onClick={() => { setPendingSwitch(null); setView("editor"); }}>继续编辑</button>
+            <button className="btn" disabled={!!busy} onClick={() => void finishProjectSwitch(false)}>不保存，切换</button>
+            <button className="btn primary" disabled={!!busy} onClick={() => void finishProjectSwitch(true)}>保存并切换</button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={newOpen} onOpenChange={setNewOpen}>
         <DialogContent className="new-dialog">
           <DialogHeader>
@@ -1975,7 +1853,7 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
           <button
             className="btn primary wide"
             onClick={createProject}
-            disabled={!newName.trim()}
+            disabled={!newName.trim() || !!busy}
           >
             创建并导入素材
           </button>

@@ -403,6 +403,72 @@ export function sourceAsset(p: Project, m: DesignModule): Asset | undefined {
   const id = m.sourceImageId || m.imageId;
   return p.assets.find((a) => a.id === id && !a.generated);
 }
+export function updatePlanModule(p: Project, id: string, changes: Partial<DesignModule>): Project {
+  const current = p.modules.find((m) => m.id === id);
+  if (!current) return p;
+  const update = { ...changes };
+  const primaryId = changes.sourceImageId ?? changes.imageId;
+  const secondaryId = changes.sourceImageId2 ?? changes.imageId2;
+  const isOriginal = (assetId: string) => p.assets.some((a) => a.id === assetId && !a.generated);
+  if (primaryId !== undefined && !isOriginal(primaryId)) return p;
+  if (secondaryId !== undefined && secondaryId !== "" && !isOriginal(secondaryId)) return p;
+  const primaryChanged = primaryId !== undefined &&
+    (current.imageId !== primaryId || (current.sourceImageId || current.imageId) !== primaryId);
+  if (primaryId !== undefined) {
+    update.imageId = primaryId;
+    update.sourceImageId = primaryId;
+    if (primaryChanged) {
+      update.aiStatus = p.generation === "ai" && needsAI(p, current) ? "pending" : undefined;
+      update.aiError = undefined;
+    }
+  }
+  if (secondaryId !== undefined) {
+    update.imageId2 = secondaryId;
+    update.sourceImageId2 = secondaryId;
+  }
+  return {
+    ...p,
+    // A saved job belongs to its original photo. New selections must not reload its old result.
+    generationBatch: primaryChanged ? crypto.randomUUID() : p.generationBatch,
+    modules: p.modules.map((m) => m.id === id ? { ...m, ...update } : m),
+  };
+}
+export function updateProjectTemplate(p: Project, template: TemplateId): Project {
+  if (p.template === template) return p;
+  const next: Project = {
+    ...p,
+    template,
+    generationBatch: crypto.randomUUID(),
+    workflow: "plan",
+    status: "draft",
+  };
+  if (!p.assets.some((asset) => !asset.generated)) return { ...next, modules: [] };
+  next.modules = makeModules(next).map((module) => {
+    const previous = p.modules.find((old) => old.kind === module.kind && moduleSection(old) === moduleSection(module));
+    if (!previous) return module;
+    const original = sourceAsset(p, previous);
+    const updated = {
+      ...module,
+      title: previous.title,
+      subtitle: previous.subtitle,
+      ...(original ? {
+        imageId: original.id,
+        sourceImageId: original.id,
+        cropX: previous.cropX,
+        cropY: previous.cropY,
+      } : {}),
+    };
+    if (usesSecondary(module) && usesSecondary(previous)) {
+      const secondaryId = previous.sourceImageId2 ?? previous.imageId2;
+      if (secondaryId === "" || p.assets.some((asset) => asset.id === secondaryId && !asset.generated)) {
+        updated.imageId2 = secondaryId;
+        updated.sourceImageId2 = secondaryId;
+      }
+    }
+    return updated;
+  });
+  return next;
+}
 export function usesSecondary(m: DesignModule): boolean {
   return m.section ? m.section === "colors" || m.section === "components" : [2, 4, 8, 9].includes(m.layout);
 }

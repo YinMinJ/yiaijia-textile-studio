@@ -7,7 +7,7 @@ import { z } from "zod";
 import {
   sampleProject, freshProject, makeModules, sourceAsset, needsAI,
   moduleSection, modulePurpose, dimensions, prepareImageRun, usesSecondary,
-  categories, categoryFor, switchCategory,
+  categories, categoryFor, switchCategory, updatePlanModule, updateProjectTemplate,
 } from "../lib/design-model.ts";
 
 test("quilt plans follow the reference category and keep the correct original photos", () => {
@@ -57,6 +57,124 @@ test("one-image redo keeps other completed photos ready while a first preview le
   assert.equal(preview.modules.find(m => m.section === "scene").aiStatus, "pending");
   assert.ok(preview.modules.filter(m => !needsAI(preview, m)).every(m => m.aiStatus === "succeeded"));
   assert.deepEqual(p.modules.filter(usesSecondary).map(m => m.section), ["colors"]);
+});
+
+test("editing plan copy preserves completed images, generation batch and the current workflow", () => {
+  for (const workflow of [undefined, "plan", "preview", "complete"]) {
+    const p = { ...sampleProject(), workflow, generation: "ai", generationBatch: randomUUID() };
+    const target = p.modules[0];
+    Object.assign(target, { imageId: "generated-hero", aiStatus: "succeeded" });
+    const before = structuredClone(p);
+    const next = updatePlanModule(p, target.id, { title: "手动首图标题", subtitle: "手动补充说明" });
+    assert.equal(next.workflow, workflow);
+    assert.equal(next.generationBatch, p.generationBatch);
+    assert.equal(next.assets, p.assets);
+    assert.deepEqual(next.modules[0], { ...target, title: "手动首图标题", subtitle: "手动补充说明" });
+    assert.ok(next.modules.slice(1).every((m, index) => m === p.modules[index + 1]));
+    assert.deepEqual(p, before);
+  }
+});
+
+test("changing a plan's primary photo invalidates only that result without restarting the workflow", () => {
+  for (const workflow of ["plan", "preview", "complete"]) {
+    const p = { ...sampleProject(), workflow, generation: "ai", generationBatch: randomUUID() };
+    const target = p.modules[0];
+    Object.assign(target, { imageId: "generated-hero", aiStatus: "failed", aiError: "old failure" });
+    p.assets.push({ ...p.assets[0], id: "generated-hero", generated: true });
+    p.modules[1].aiStatus = "succeeded";
+    const before = structuredClone(p);
+    const next = updatePlanModule(p, target.id, { imageId: "00237" });
+    assert.equal(next.workflow, workflow);
+    assert.notEqual(next.generationBatch, p.generationBatch);
+    assert.match(next.generationBatch, /^[\da-f-]{36}$/);
+    assert.equal(next.assets, p.assets, "existing generated assets stay available");
+    assert.deepEqual(next.modules[0], { ...target, imageId: "00237", sourceImageId: "00237", aiStatus: "pending", aiError: undefined });
+    assert.ok(next.modules.slice(1).every((m, index) => m === p.modules[index + 1]));
+    assert.deepEqual(p, before);
+  }
+  const photoLayout = { ...sampleProject(), workflow: "complete", generation: "template" };
+  assert.equal(updatePlanModule(photoLayout, photoLayout.modules[0].id, { imageId: "00237" }).modules[0].aiStatus, undefined);
+  const aiLayout = { ...sampleProject(), workflow: "complete", generation: "ai" };
+  const craft = aiLayout.modules.find(m => m.section === "craft");
+  assert.equal(updatePlanModule(aiLayout, craft.id, { sourceImageId: "00233" }).modules.find(m => m.id === craft.id).aiStatus, undefined, "photo-only modules do not become pending AI jobs");
+});
+
+test("secondary photo selection and removal preserve the primary result and generation batch", () => {
+  const p = { ...sampleProject(), workflow: "complete", generation: "ai", generationBatch: randomUUID() };
+  const target = p.modules.find(m => m.section === "colors");
+  target.aiStatus = "succeeded";
+  for (const imageId2 of ["00240", ""]) {
+    const next = updatePlanModule(p, target.id, { imageId2 });
+    assert.equal(next.workflow, "complete");
+    assert.equal(next.generationBatch, p.generationBatch);
+    assert.deepEqual(next.modules.find(m => m.id === target.id), { ...target, imageId2, sourceImageId2: imageId2 });
+    assert.ok(next.modules.filter(m => m.id !== target.id).every(m => m === p.modules.find(old => old.id === m.id)));
+  }
+  const unchanged = updatePlanModule(p, target.id, { imageId: target.sourceImageId });
+  assert.equal(unchanged.generationBatch, p.generationBatch, "reselecting an unchanged original needs no new batch");
+  p.assets.push({ ...p.assets[0], id: "generated-photo", generated: true });
+  assert.equal(updatePlanModule(p, target.id, { imageId: "generated-photo" }), p);
+  assert.equal(updatePlanModule(p, target.id, { imageId2: "missing-photo" }), p);
+});
+
+test("reselecting the current template leaves manual copy, AI results and workflow untouched", () => {
+  const p = { ...sampleProject(), generation: "ai", workflow: "complete", generationBatch: randomUUID() };
+  Object.assign(p.modules[0], { title: "手写标题", imageId: "generated", aiStatus: "succeeded" });
+  assert.equal(updateProjectTemplate(p, p.template), p);
+});
+
+test("switching templates preserves edited copy and real photo crops by purpose rather than image number", () => {
+  const p = { ...sampleProject(), generation: "ai", workflow: "complete", generationBatch: randomUUID() };
+  for (const module of p.modules) {
+    module.title = `${module.kind}-${module.section}-已编辑`;
+    module.subtitle = `${module.kind}-${module.section}-补充说明`;
+  }
+  const hero = p.modules.find(m => m.kind === "main" && m.section === "hero");
+  Object.assign(hero, { title: "手写首图", subtitle: "", imageId: "generated-hero", sourceImageId: "00237", cropX: 31, cropY: 69, aiStatus: "succeeded" });
+  p.assets.push({ ...p.assets[0], id: "generated-hero", generated: true });
+  const scene = p.modules.find(m => m.kind === "main" && m.section === "scene");
+  Object.assign(scene, { imageId: "00224", sourceImageId: "00224", cropX: 70, cropY: 40 });
+  const colors = p.modules.find(m => m.kind === "main" && m.section === "colors");
+  Object.assign(colors, { imageId2: "", sourceImageId2: "" });
+  const before = structuredClone(p);
+  const next = updateProjectTemplate(p, "warm");
+  assert.equal(next.template, "warm");
+  assert.equal(next.workflow, "plan");
+  assert.equal(next.status, "draft");
+  assert.notEqual(next.generationBatch, p.generationBatch);
+  assert.equal(next.assets, p.assets);
+  const nextHero = next.modules.find(m => m.kind === "main" && moduleSection(m) === "hero");
+  assert.equal(nextHero.title, "手写首图");
+  assert.equal(nextHero.subtitle, "");
+  assert.equal(nextHero.imageId, "00237");
+  assert.equal(nextHero.sourceImageId, "00237");
+  assert.equal(nextHero.cropX, 31);
+  assert.equal(nextHero.cropY, 69);
+  const nextScene = next.modules.find(m => m.kind === "main" && moduleSection(m) === "scene");
+  assert.notEqual(nextScene.index, scene.index, "purpose moves from main image 2 to 4");
+  assert.equal(nextScene.title, scene.title);
+  assert.equal(nextScene.subtitle, scene.subtitle);
+  assert.equal(nextScene.imageId, "00224");
+  assert.equal(nextScene.cropX, scene.cropX);
+  assert.equal(nextScene.cropY, scene.cropY);
+  assert.equal(next.modules.find(m => m.kind === "main" && moduleSection(m) === "colors").sourceImageId2, "");
+  assert.ok(next.modules.every(m => !m.aiStatus && !m.aiError && !p.assets.find(a => a.id === m.imageId)?.generated));
+  assert.deepEqual(p, before);
+});
+
+test("template changes safely use new original defaults when legacy source references are missing", () => {
+  const p = { ...sampleProject(), template: "warm", output: "detail" };
+  p.modules = makeModules(p);
+  const legacyHero = p.modules[0];
+  legacyHero.title = "旧版首图标题";
+  legacyHero.imageId = "generated-legacy";
+  delete legacyHero.sourceImageId;
+  p.assets.push({ ...p.assets[0], id: legacyHero.imageId, generated: true });
+  const next = updateProjectTemplate(p, "vip");
+  assert.equal(next.modules.length, 7);
+  assert.equal(next.modules[0].title, legacyHero.title);
+  assert.ok(next.modules.every(m => p.assets.some(a => a.id === m.imageId && !a.generated)));
+  assert.deepEqual(updateProjectTemplate(freshProject(), "clean").modules, [], "selecting a style before upload creates no broken image references");
 });
 
 test("empty product facts stay empty instead of gaining materials, certificates or functions", () => {
@@ -148,7 +266,7 @@ globalThis.__designWorkflowRoute = {
   errorResponse: error => { throw error; },
   db: () => ({ prepare: sql => ({ bind: (...args) => ({
     first: async () => sql.includes("FROM assets") ? { id: args[0] } : heldProjects.has(args[0]) ? { owner_id: "test-owner" } : null,
-    all: async () => ({ results: sql.includes("FROM generation_jobs") ? jobs : [...heldProjects.values()].map(data => ({ data })) }),
+    all: async () => ({ results: sql.includes("FROM generation_jobs") ? jobs.filter(job => !job.id || job.id.startsWith(args[2].slice(0, -1))) : [...heldProjects.values()].map(data => ({ data })) }),
     run: async () => { if (sql.includes("INSERT INTO projects")) heldProjects.set(args[0], args[3]); return { meta: { changes: 1 } }; },
   }) }) }),
 };
@@ -181,6 +299,49 @@ test("project save and reload preserve semantic plans, workflow and original ref
   assert.equal(reloaded.modules[0].sourceImageId, p.modules[0].sourceImageId);
   assert.equal(sourceAsset(reloaded, reloaded.modules[0]).id, "00224");
   assert.equal((await post(reloaded)).status, 200);
+});
+
+test("saving a new plan photo prevents old generation jobs from restoring the previous result", async () => {
+  heldProjects.clear();
+  const p = { ...sampleProject(), id: randomUUID(), workflow: "complete", generation: "ai", generationBatch: randomUUID() };
+  const target = p.modules[0];
+  const oldResult = { ...p.assets[0], id: randomUUID(), generated: true };
+  oldResult.url = "/api/assets/" + oldResult.id;
+  p.assets.push(oldResult);
+  Object.assign(target, { imageId: oldResult.id, aiStatus: "succeeded" });
+  jobs = [{ id: `${p.id}:${p.generationBatch}:${target.id}`, module_id: target.id, status: "succeeded", result: JSON.stringify(oldResult) }];
+  const next = updatePlanModule(p, target.id, { imageId: "00237" });
+  assert.equal((await post(next)).status, 200);
+  const reloaded = (await (await route.GET()).json()).projects[0];
+  assert.equal(reloaded.workflow, "complete");
+  assert.equal(reloaded.generationBatch, next.generationBatch);
+  assert.equal(reloaded.modules[0].imageId, "00237");
+  assert.equal(reloaded.modules[0].sourceImageId, "00237");
+  assert.equal(reloaded.modules[0].aiStatus, "pending");
+  assert.deepEqual(reloaded.modules.slice(1), p.modules.slice(1));
+  assert.ok(reloaded.assets.some(a => a.id === oldResult.id), "prior image is retained without becoming the selected photo");
+  jobs = [];
+});
+
+test("saving a new template never reloads generation results created for the previous template", async () => {
+  heldProjects.clear();
+  const p = { ...sampleProject(), id: randomUUID(), workflow: "complete", generation: "ai", generationBatch: randomUUID() };
+  const target = p.modules[0];
+  const oldResult = { ...p.assets[0], id: randomUUID(), generated: true };
+  oldResult.url = "/api/assets/" + oldResult.id;
+  p.assets.push(oldResult);
+  Object.assign(target, { imageId: oldResult.id, aiStatus: "succeeded", title: "首图手写内容" });
+  jobs = [{ id: `${p.id}:${p.generationBatch}:${target.id}`, module_id: target.id, status: "succeeded", result: JSON.stringify(oldResult) }];
+  const next = updateProjectTemplate(p, "clean");
+  assert.equal((await post(next)).status, 200);
+  const reloaded = (await (await route.GET()).json()).projects[0];
+  assert.equal(reloaded.template, "clean");
+  assert.equal(reloaded.workflow, "plan");
+  assert.equal(reloaded.modules[0].title, "首图手写内容");
+  assert.equal(reloaded.modules[0].imageId, target.sourceImageId);
+  assert.equal(reloaded.modules[0].aiStatus, undefined);
+  assert.deepEqual(reloaded.modules, next.modules);
+  jobs = [];
 });
 
 test("saving rejects missing or generated original references while old projects stay valid", async () => {
