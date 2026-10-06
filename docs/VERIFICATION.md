@@ -1,19 +1,21 @@
 # 织境验证记录
 
-## Qwen 文案反复超时修复（2026-10-06，待生产部署验收）
+## Qwen 文案反复超时修复与线上验收（2026-10-06）
 
 - 复查时已保存的文案模型为 `qwen3.8-flash`。服务商记录的同类请求耗时为约48秒、68.638秒和97.724秒；原后端60秒、前端75秒的等待上限会截断仍在处理的请求。此前一次成功不代表反复超时问题已解决。
 - 将文案请求后端上限调整为180秒，前端保留15秒余量，等待上限为195秒；等待45秒后显示较慢提示。继续保留已有文案，禁止重复点击，不自动重试或切换模型。
 - 仅对 `api.b.ai` 的 `qwen3.8-flash`（模型名大小写不敏感）在原 Chat Completions 请求中加入 `enable_thinking: false`。B.AI 的[模型页](https://docs.b.ai/llmservice/models/qwen3-8-flash/)将该参数描述为 QwenCloud 能力，统一[API 参考](https://docs.b.ai/llmservice/api/)未明确承诺转发此字段，因此本次兼容性依据实际探测，不推广到其他提供商或 Qwen 型号。Qwen 保持 Chat 接口；B.AI 文档列出的 Responses 支持系列为 GPT 与 DeepSeek。
 - 使用完整的4张床上套件文案提示进行一次直接探测，返回 HTTP 200、`finish_reason=stop`，耗时5.285秒；输入1041 tokens、输出185 tokens、合计1226 tokens，4张文案完整返回。响应没有 `reasoning_content` 字段；未返回显式推理 token 数，不能据此记录为“推理0 tokens”。
-- 上述直接探测通过；本节记录代码修复与探测结果。生产尚未升级至本次修复，浏览器完整流程及首图保留情况仍待部署后验收，不以一次快速探测承诺固定响应时间。
+- 生产已部署 `63b2e62f2fa30f4b8d382cfc89e1d58aa38ce293`，GitHub Actions [37441977893](https://github.com/YinMinJ/yiaijia-textile-studio/actions/runs/37441977893) 耗时1分59秒、151项测试及构建通过。发布包54,894,462字节，SHA256 为 `1d725f3b4b654d18f7e97ecbc09edc0d2d62dadb69d717161e99171e4bbae597`。保存的文案模型 `qwen3.8-flash` 和图片模型 `gpt-image-2` 未被升级改动。
+- **生产浏览器完整流程通过。** 独立页签使用内置被子样例，界面显示 Qwen 已生成其余4张图的文案；首图标题“立体格纹绗缝被”和说明“格纹肌理·弧线绗缝”保持不变。B.AI 用量记录于北京时间17:22:59确认该次调用：输入1114 tokens、输出212 tokens、合计1326 tokens，服务商记录耗时5.246秒。该耗时不包含完整浏览器往返过程，也不代表固定响应时间保证。
+- 本次未自动重试、未调用图片生成，未操作用户原有的未保存床上套件作品页签。成功截图保存在本机 `data/proofs/qwen-copy-timeout-fixed.png`，不提交仓库。直接探测在服务商用量页的耗时为4.367秒，与前述5.285秒端到端耗时口径不同。
 
-## 当前服务器升级与文案复验
+## 上一版本服务器升级与 DeepSeek 文案复验（历史记录）
 
-- 生产已切换到 `0779e99576b776623669c812dd714f39bf3d09d0`，对应 GitHub Actions [37437197486](https://github.com/YinMinJ/yiaijia-textile-studio/actions/runs/37437197486)。安装发布包 SHA256 为 `b31bcd57b913b12fb702d0a10cb95849ed1ad164d86d28e7cfbcfe521dce397d`；CI 完成144项测试、Vue/Next类型检查、生产构建及两组隔离HTTP验收；未在生产服务器安装构建依赖或编译。
+- 当时生产切换到 `0779e99576b776623669c812dd714f39bf3d09d0`，对应 GitHub Actions [37437197486](https://github.com/YinMinJ/yiaijia-textile-studio/actions/runs/37437197486)。安装发布包 SHA256 为 `b31bcd57b913b12fb702d0a10cb95849ed1ad164d86d28e7cfbcfe521dce397d`；CI 完成144项测试、Vue/Next类型检查、生产构建及两组隔离HTTP验收；未在生产服务器安装构建依赖或编译。
 - 数据库只读复核：`PRAGMA quick_check=ok`，accounts=1、projects=0、assets=1、model_settings=1。新增的一张素材来自本次线上生图验收，并非迁移本机作品；加密主密钥与升级前逐字节比较一致。
 - 模型列表、2048 × 2048 实际生图及美国中继链路已在此前阶段通过下方记录的验收。SSH 断线自动重连测试恢复 active，`NRestarts=1`；其他域名的 HTTPS CONNECT 被拒绝为403。3010、13128、18443三个服务端口均只监听回环地址。
-- **文案复验通过。** 当前版本改用 Responses 接口。一次页面调用在60秒超时，原因未确定；随后最小直接探测在约2.947秒返回 HTTP 200，输出5 tokens、推理0 tokens。确认探测正常后手动重试页面请求，界面显示“已由 deepseek-v4.1-flash 生成4张图的文案。首图保留原文”；没有自动重试。
+- **当次 DeepSeek 文案复验通过。** 该版本对 B.AI 的 `deepseek-v4.1-flash` 改用 Responses 接口。一次页面调用在60秒超时，原因未确定；随后最小直接探测在约2.947秒返回 HTTP 200，输出5 tokens、推理0 tokens。确认探测正常后手动重试页面请求，界面显示“已由 deepseek-v4.1-flash 生成4张图的文案。首图保留原文”；没有自动重试。
 - 首图标题“立体格纹绗缝被”和说明“格纹肌理·弧线绗缝”保持不变；其余4张标题分别更新为“铺一床温柔的卧室”“绗缝留下的饱满感”“看得见的弧线走线”“米白，还是灰紫”。本次文案结果与此前2048 × 2048实际生图、带鉴权模型列表共同完成线上模型调用验收。文案成功截图保存在本机 `data/proofs/bai-live-copy-generated.png`，未保存测试作品或提交截图。
 
 ## B.AI 美国中继部署与链路恢复
