@@ -45,8 +45,10 @@ export type DesignModule = {
   imageId2: string;
   cropX: number;
   cropY: number;
+  imageZoom?: number;
   layout: number;
   section?: ModuleSection;
+  composition?: "auto" | "immersive" | "split" | "minimal";
   sourceImageId?: string;
   sourceImageId2?: string;
   aiStatus?: "pending" | "succeeded" | "failed";
@@ -173,6 +175,11 @@ export function freshProject(): Project {
     workflow: "plan",
   };
 }
+function assetColor(p: Project, asset: Asset): string | undefined {
+  const matches = p.info.colors.split(/[·,，、/;；\n]/).map(s => s.trim()).filter(Boolean)
+    .filter(color => asset.name.includes(color));
+  return matches.length === 1 ? matches[0] : undefined;
+}
 export function makeModules(p: Project): DesignModule[] {
   const originals = p.assets.filter((a) => !a.generated);
   const whole = originals.filter((a) => a.role === "整体");
@@ -197,9 +204,15 @@ export function makeModules(p: Project): DesignModule[] {
     const pillow = withRole("枕套");
     const craftId = craft.length ? choose(craft, 0) : choose(detail, Math.min(2, Math.max(0, detail.length - 1)));
     const colorPhoto = prefer(colors, whole);
-    const texturePhoto = prefer(detail, duvet, whole);
+    const texturePhoto = prefer(detail.filter(a => /面料|纹理|格纹|肌理|特写/.test(a.name)), detail, duvet, whole);
     const compositionPhoto = prefer(duvet, sheet, pillow, whole);
-    const componentSecond = [...pillow, ...sheet, ...duvet].find((a) => a.id !== choose(compositionPhoto, 0));
+    const detailPoint = (pattern: RegExp, fallback: string) => short(points.find(point => pattern.test(point)) || "", fallback);
+    const distinctSecond = (firstId: string, group: Asset[]) => group.find(a => a.id !== firstId)?.id || "";
+    const matchingSecond = (firstId: string, group: Asset[]) => {
+      const first = originals.find(a => a.id === firstId);
+      const color = first && assetColor(p, first);
+      return color ? group.find(a => a.id !== firstId && assetColor(p, a) === color)?.id || "" : "";
+    };
     type Descriptor = {
       section: ModuleSection;
       title: string;
@@ -208,16 +221,18 @@ export function makeModules(p: Project): DesignModule[] {
       imageId2?: string;
     };
     const texture: Descriptor = {
-      section: "texture", title: short(points[0] || "", "近看面料纹理"),
-      subtitle: p.info.material ? "面料：" + p.info.material : "面料纹理，用近景实拍看清", imageId: choose(texturePhoto, 0),
+      section: "texture", title: detailPoint(/面料|纹|肌理|织|棉|绒|丝|柔|触感/, "细看，面料的质感"),
+      subtitle: p.info.material ? "面料：" + p.info.material : "近景实拍 · 看清织物纹理", imageId: choose(texturePhoto, 0),
+      imageId2: matchingSecond(choose(texturePhoto, 0), whole),
     };
     const craftsmanship: Descriptor = {
-      section: "craft", title: short(points[1] || "", "做工藏在细节里"),
-      subtitle: "工艺细节单独展示，请以当前商品实拍为准", imageId: craftId,
+      section: "craft", title: detailPoint(/绗缝|工艺|包边|走线|缝|拉链|纽扣|针脚/, "细节，经得起近看"),
+      subtitle: "工艺近景 · 实物细节", imageId: craftId,
+      imageId2: matchingSecond(craftId, whole),
     };
     const color: Descriptor = {
       section: "colors", title: "颜色实拍对照", subtitle: p.info.colors || "请核对所选颜色",
-      imageId: choose(colorPhoto, 0), imageId2: choose(colorPhoto, 1),
+      imageId: choose(colorPhoto, 0), imageId2: distinctSecond(choose(colorPhoto, 0), colorPhoto),
     };
     const specs: Descriptor = {
       section: "specs", title: "商品参数与洗护",
@@ -230,22 +245,24 @@ export function makeModules(p: Project): DesignModule[] {
       imageId: choose(categoryFor(p).id === "quilt" ? prefer(folded, whole) : whole, 0),
     };
     const scene: Descriptor = {
-      section: "scene", title: categoryFor(p).id === "quilt" ? "铺开看看，整体效果" : "一眼看全，整床搭配",
-      subtitle: "铺床实拍，查看整体花型与配色", imageId: choose(whole, 1),
+      section: "scene", title: categoryFor(p).id === "quilt" ? "铺开，舒服的日常" : "把喜欢的花色，铺进卧室",
+      subtitle: "整床场景 · 实物配色", imageId: choose(whole, 1),
     };
     const fill: Descriptor = {
-      section: "filling", title: p.info.filling ? "填充与被子形态" : "看清被子形态",
+      section: "filling", title: p.info.filling ? "内在用料，认真说明" : "垂落的弧度，看得见的形态",
       subtitle: p.info.filling ? "填充物：" + p.info.filling : filling.length ? "填充实拍，展示实际商品内部" : "当前展示商品外观；填充信息请以商品标签为准",
       imageId: choose(prefer(filling, folded, whole), 0),
+      imageId2: matchingSecond(choose(prefer(filling, folded, whole), 0), folded),
     };
     const components: Descriptor = {
       section: "components", title: "套件组成，逐件看清",
       subtitle: p.info.setContents?.trim() || "请核对当前套件实际包含的品项与件数",
-      imageId: choose(compositionPhoto, 0), imageId2: componentSecond?.id || "",
+      imageId: choose(compositionPhoto, 0), imageId2: matchingSecond(choose(compositionPhoto, 0), [...pillow, ...sheet, ...duvet]),
     };
     const pattern: Descriptor = {
-      section: "pattern", title: "花型与配色，近看更清楚",
-      subtitle: "花型大小、排列与配色，以商品实拍为准", imageId: choose(prefer(colors, duvet, whole), 0),
+      section: "pattern", title: "让花色，成为卧室的主角",
+      subtitle: "花型近景 · 实物配色", imageId: choose(prefer(colors, duvet, whole), 0),
+      imageId2: matchingSecond(choose(prefer(colors, duvet, whole), 0), whole),
     };
     const descriptors: Descriptor[] = categoryFor(p).id === "bedding-set" ? [
       hero, scene, texture, components, color,
@@ -253,7 +270,7 @@ export function makeModules(p: Project): DesignModule[] {
     ] : [
       hero, scene, fill, craftsmanship, color,
       hero,
-      { section: "benefits", title: "值得细看的地方", subtitle: points.slice(0, 6).join(" · ") || "整体形态 · 面料纹理 · 做工细节", imageId: choose(whole, 0) },
+      { section: "benefits", title: "喜欢它，从这些细节开始", subtitle: points.slice(0, 3).join(" · ") || "整体形态 · 面料纹理 · 做工细节", imageId: choose(whole, 0) },
       texture, fill, craftsmanship, color, specs,
     ];
     return descriptors.map((item, i): DesignModule => ({
@@ -261,6 +278,7 @@ export function makeModules(p: Project): DesignModule[] {
       kind: i < 5 ? "main" : "detail",
       index: i < 5 ? i + 1 : i - 4,
       section: item.section,
+      composition: "auto",
       title: item.title,
       subtitle: item.subtitle.slice(0, 160),
       imageId: item.imageId,
@@ -385,7 +403,7 @@ export function modulePurpose(m: DesignModule): string {
 export function needsAI(p: Project, m: DesignModule): boolean {
   const section = moduleSection(m);
   return p.template === "vip"
-    ? section === "hero" || section === "scene"
+    ? section === "hero" || section === "scene" || section === "benefits"
     : section !== "specs";
 }
 export function prepareImageRun(p: Project, onlyId?: string): Project {
@@ -402,6 +420,19 @@ export function sourceAsset(p: Project, m: DesignModule): Asset | undefined {
   // Once chosen, a missing source must be repaired explicitly instead of switching products/colors.
   const id = m.sourceImageId || m.imageId;
   return p.assets.find((a) => a.id === id && !a.generated);
+}
+export function referenceAssets(p: Project, m: DesignModule): Asset[] {
+  const primary = sourceAsset(p, m);
+  if (!primary) return [];
+  const primaryColor = assetColor(p, primary);
+  // Unknown color variants must remain single-reference rather than blend several SKUs.
+  if (!primaryColor) return [primary];
+  const candidates = p.assets.filter(a => !a.generated && a.id !== primary.id &&
+    assetColor(p, a) === primaryColor);
+  const detail = candidates.find(a => ["细节", "工艺", "被套"].includes(a.role));
+  const whole = candidates.find(a => ["整体", "叠放"].includes(a.role));
+  return [primary, ...(detail ? [detail] : []), ...(whole ? [whole] : []), ...candidates]
+    .filter((asset, index, list) => list.findIndex(a => a.id === asset.id) === index).slice(0, 3);
 }
 export function updatePlanModule(p: Project, id: string, changes: Partial<DesignModule>): Project {
   const current = p.modules.find((m) => m.id === id);
@@ -451,11 +482,13 @@ export function updateProjectTemplate(p: Project, template: TemplateId): Project
       ...module,
       title: previous.title,
       subtitle: previous.subtitle,
+      ...(previous.composition ? { composition: previous.composition } : {}),
       ...(original ? {
         imageId: original.id,
         sourceImageId: original.id,
         cropX: previous.cropX,
         cropY: previous.cropY,
+        ...(previous.imageZoom !== undefined ? { imageZoom: previous.imageZoom } : {}),
       } : {}),
     };
     if (usesSecondary(module) && usesSecondary(previous)) {
@@ -470,7 +503,7 @@ export function updateProjectTemplate(p: Project, template: TemplateId): Project
   return next;
 }
 export function usesSecondary(m: DesignModule): boolean {
-  return m.section ? m.section === "colors" || m.section === "components" : [2, 4, 8, 9].includes(m.layout);
+  return m.section ? ["colors", "components", "texture", "craft", "pattern", "filling"].includes(m.section) : [2, 4, 8, 9].includes(m.layout);
 }
 export function switchCategory(p: Project, category: ProductCategory): Project {
   const next: Project = {

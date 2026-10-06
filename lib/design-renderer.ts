@@ -64,12 +64,15 @@ function cover(
   h: number,
   cx = 50,
   cy = 50,
+  zoom = 1,
 ) {
-  const scale = Math.max(w / image.naturalWidth, h / image.naturalHeight);
+  const enlargement = Number.isFinite(zoom) ? Math.min(2, Math.max(1, zoom)) : 1;
+  const scale = Math.max(w / image.naturalWidth, h / image.naturalHeight) * enlargement;
   const sw = w / scale,
     sh = h / scale;
-  const sx = ((image.naturalWidth - sw) * cx) / 100,
-    sy = ((image.naturalHeight - sh) * cy) / 100;
+  const position = (value: number) => Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 50;
+  const sx = ((image.naturalWidth - sw) * position(cx)) / 100,
+    sy = ((image.naturalHeight - sh) * position(cy)) / 100;
   ctx.drawImage(image, sx, sy, sw, sh, x, y, w, h);
 }
 
@@ -80,6 +83,7 @@ function wrapLines(
 ) {
   const lines: string[] = [];
   for (const paragraph of value.trim().split(/\r?\n/)) {
+    const paragraphStart = lines.length;
     let line = "";
     for (const letter of paragraph) {
       if (line && ctx.measureText(line + letter).width > width) {
@@ -87,7 +91,22 @@ function wrapLines(
         line = letter.trimStart();
       } else line += letter;
     }
-    if (line) lines.push(line);
+    if (line) {
+      // Balance an automatically wrapped one-character Chinese tail. Explicit
+      // newlines and punctuation stay where the author placed them.
+      if (/^\p{Script=Han}$/u.test(line) && lines.length > paragraphStart) {
+        const previous = [...lines[lines.length - 1]];
+        const last = previous[previous.length - 1];
+        const beforeLast = previous[previous.length - 2];
+        if (previous.length > 2 && /^\p{Script=Han}$/u.test(last) &&
+          !/[（\[\{《〈「『【〔“‘]/u.test(beforeLast) &&
+          ctx.measureText(last + line).width <= width) {
+          lines[lines.length - 1] = previous.slice(0, -1).join("");
+          line = last + line;
+        }
+      }
+      lines.push(line);
+    }
   }
   return lines;
 }
@@ -164,35 +183,49 @@ async function drawVip(
     (main
       ? ["hero", "texture", "craft", "scene", "colors"]
       : ["hero", "benefits", "texture", "craft", "colors", "specs", "care"])[m.index - 1];
-  const palette = { ...category.palette, white: "#fffdf8", line: bedding ? "#e5dbc1" : "#d8cbbb" };
-  const pad = main ? 52 : 44;
+  const composition = (m as DesignModule & { composition?: string }).composition || "auto";
+  const palette = { ...category.palette, white: "#fffdf8" };
+  const pad = main ? 52 : 40;
   const inner = w - pad * 2;
   ctx.fillStyle = palette.paper;
   ctx.fillRect(0, 0, w, h);
+
   const copy = (
     value: string, x: number, y: number, width: number, height: number,
-    size: number, options: Parameters<typeof textBox>[6] = { size },
-  ) => textBox(ctx, value, x, y, width, height, { color: palette.ink, ...options });
-  const rounded = (x: number, y: number, width: number, height: number, radius = 24) => {
+    size: number, options: Partial<Parameters<typeof textBox>[6]> = {},
+  ) => textBox(ctx, value, x, y, width, height, {
+    size, min: main ? 26 : 22, color: palette.ink, ...options,
+  });
+  const rect = (x: number, y: number, width: number, height: number, color: string) => {
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, width, height);
+  };
+  const rounded = (x: number, y: number, width: number, height: number, radius = 12) => {
     ctx.beginPath();
     ctx.roundRect(x, y, width, height, radius);
   };
-  const ornament = () => {
-    if (!bedding) return;
-    ctx.fillStyle = "#efe1b96b";
-    ctx.beginPath();
-    ctx.ellipse(w - 72, 168, 166, 192, -0.35, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#e5c9ba38";
-    ctx.beginPath();
-    ctx.arc(28, h - 40, 142, 0, Math.PI * 2);
-    ctx.fill();
+  const fade = (top: number, height: number, reverse = false, strength = "f5") => {
+    const gradient = ctx.createLinearGradient(0, top, 0, top + height);
+    gradient.addColorStop(0, palette.paper + (reverse ? "00" : strength));
+    gradient.addColorStop(0.48, palette.paper + "a8");
+    gradient.addColorStop(1, palette.paper + (reverse ? strength : "00"));
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, top, w, height);
   };
-  const line = (y: number, width = inner) => {
-    ctx.fillStyle = palette.ink;
-    ctx.fillRect(pad, y, width, 2);
-    ctx.fillStyle = palette.accent;
-    ctx.fillRect(pad, y - 3, Math.min(60, width), 8);
+  const brand = (onPhoto = true, x = pad, y = main ? 39 : 31) => {
+    const label = p.info.brand.trim();
+    if (!label) return;
+    const size = main ? 27 : 22;
+    ctx.font = `700 ${size}px TextileSans, sans-serif`;
+    const width = Math.min(w * 0.19, ctx.measureText(label).width + 26);
+    if (onPhoto) {
+      ctx.fillStyle = palette.white + "ed";
+      rounded(x - 13, y - 10, width, size + 23, 4);
+      ctx.fill();
+    }
+    copy(label, x, y, width - 26, size * 1.35, size, {
+      size, min: 16, color: palette.brand, weight: 700,
+    });
   };
   const points = [...new Set(p.info.sellingPoints.split(/[\n；;]/)
     .map((value) => value.trim()).filter(Boolean))];
@@ -203,52 +236,22 @@ async function drawVip(
     const slot = (width - gap * (labels.length - 1)) / labels.length;
     ctx.font = `500 ${size}px TextileSans, sans-serif`;
     const widths = labels.map((label) => Math.min(slot, ctx.measureText(label).width + 34));
-    // Keep the complete label group on the title's right edge, regardless of copy length.
     let chipX = x + width - widths.reduce((sum, value) => sum + value, 0) - gap * (labels.length - 1);
     labels.forEach((label, index) => {
       const chipWidth = widths[index];
       ctx.fillStyle = palette.accent;
-      rounded(chipX, y, chipWidth, size + 25, bedding ? 8 : (size + 25) / 2);
+      rounded(chipX, y, chipWidth, size + 25, bedding ? 7 : (size + 25) / 2);
       ctx.fill();
       copy(label, chipX + 17, y + 10, chipWidth - 34, size + 8, size,
-        { size, min: 15, color: palette.white, weight: 500, align: "center" });
+        { min: 15, color: palette.white, weight: 500, align: "center" });
       chipX += chipWidth + gap;
     });
   };
-  const brand = (onPhoto = false) => {
-    const label = p.info.brand.trim();
-    if (!label) return;
-    const size = main ? 30 : 22;
-    ctx.font = `700 ${size}px TextileSans, sans-serif`;
-    const width = Math.min(inner, ctx.measureText(label).width + 32);
-    if (onPhoto) {
-      ctx.fillStyle = "#fffdf8e8";
-      rounded(pad - 16, 28, width, size + 25, bedding ? 12 : 0);
-      ctx.fill();
-    }
-    copy(label, pad, main ? 39 : 34, inner, 42, size, {
-      size, color: palette.brand, weight: 700,
-    });
-  };
-  const header = (height: number, centered = false, subtitle = m.subtitle) => {
-    ornament();
-    brand();
-    const titleY = main ? 104 : 91;
-    const titleH = height - titleY - (subtitle ? 80 : 27);
-    const bottom = copy(m.title, pad, titleY, inner, titleH, main ? 74 : 62, {
-      size: main ? 74 : 62, min: main ? 24 : 20, weight: 700,
-      align: centered ? "center" : "left", leading: 1.18,
-    });
-    if (subtitle)
-      copy(subtitle, pad, Math.min(bottom + 17, height - 64), inner, 52,
-        main ? 30 : 25, {
-          size: main ? 30 : 25, min: 13, color: palette.muted,
-          align: centered ? "center" : "left",
-        });
-  };
-  const primary = p.assets.find((asset) => asset.id === m.imageId);
+  // Product facts remain real text, with no generated badges, diagrams or claims.
   if (section === "specs") {
-    header(222);
+    brand(false);
+    copy(m.title, pad, 91, inner, 115, main ? 66 : 54, { weight: 700, leading: 1.15 });
+    rect(pad, 211, 52, 4, palette.accent);
     const rows = [
       ["商品名称", p.info.name], ["品牌", p.info.brand],
       ["面料成分", p.info.material],
@@ -256,274 +259,289 @@ async function drawVip(
       ["尺寸规格", p.info.size], ...(!bedding ? [["重量", p.info.weight]] : []),
       ["颜色", p.info.colors], ["洗护说明", p.info.care],
     ].filter(([, value]) => value.trim());
-    const valueWidth = inner - 176;
-    let fontSize = 26;
+    const valueWidth = inner - 162;
+    let fontSize = main ? 30 : 28;
     let heights: number[] = [];
     for (;;) {
       ctx.font = `400 ${fontSize}px TextileSans, sans-serif`;
-      heights = rows.map(([, value]) => Math.max(70,
+      heights = rows.map(([, value]) => Math.max(75,
         wrapLines(ctx, value, valueWidth).length * fontSize * 1.3 + 32));
-      if (heights.reduce((sum, value) => sum + value, 0) <= h - 266 || fontSize <= 12)
-        break;
+      if (heights.reduce((sum, value) => sum + value, 0) <= h - 258 || fontSize <= 18) break;
       fontSize--;
     }
-    let y = 226;
+    const available = h - 262;
+    const factor = Math.min(1, available / (heights.reduce((sum, value) => sum + value, 0) || 1));
+    let y = 238;
     rows.forEach(([label, value], index) => {
-      const rowHeight = heights[index];
-      ctx.fillStyle = index % 2 === 0 ? (bedding ? "#f0e6cd" : "#ede2d2") : palette.white;
-      ctx.fillRect(pad, y, inner, rowHeight);
-      copy(label, pad + 20, y + 20, 130, rowHeight - 26, 23, {
-        size: 23, color: palette.muted,
+      const rowHeight = heights[index] * factor;
+      if (index) rect(pad, y, inner, 1, palette.muted + "32");
+      copy(label, pad, y + 21, 132, rowHeight - 26, Math.min(fontSize, 25), {
+        min: 16, color: palette.muted,
       });
-      copy(value, pad + 154, y + 18, valueWidth, rowHeight - 28, fontSize, {
-        size: fontSize, min: fontSize,
+      copy(value, pad + 158, y + 18, valueWidth, rowHeight - 25, fontSize, {
+        min: 16, leading: 1.3,
       });
       y += rowHeight;
     });
-    if (primary && h - y > 260) {
-      const product = await picture(primary.url);
-      cover(ctx, product, pad, y + 30, inner, h - y - 62, m.cropX, m.cropY);
-    }
     return;
   }
+
+  const primary = p.assets.find((asset) => asset.id === m.imageId);
   if (!primary) throw new Error("请为这张图选择对应的商品实拍。");
   const img = await picture(primary.url);
+  const secondAsset = p.assets.find((asset) => asset.id === m.imageId2 && asset.id !== primary.id &&
+    asset.id !== (m.sourceImageId || primary.id) && !asset.generated);
+  const second = secondAsset ? await picture(secondAsset.url) : undefined;
   const photo = (x: number, y: number, width: number, height: number) =>
-    cover(ctx, img, x, y, width, height, m.cropX, m.cropY);
+    cover(ctx, img, x, y, width, height, m.cropX, m.cropY, m.imageZoom);
   const photoFrame = (image: HTMLImageElement, x: number, y: number,
-    width: number, height: number, fit = false, radius = bedding ? 30 : 0) => {
+    width: number, height: number, fit = false, radius = 0) => {
     ctx.save();
     rounded(x, y, width, height, radius);
     ctx.clip();
-    ctx.fillStyle = palette.white;
-    ctx.fillRect(x, y, width, height);
+    rect(x, y, width, height, palette.white);
     if (fit) contain(ctx, image, x, y, width, height);
-    else cover(ctx, image, x, y, width, height, m.cropX, m.cropY);
+    else cover(ctx, image, x, y, width, height);
     ctx.restore();
   };
-
-  if (section === "colors") {
-    header(main ? 268 : 249);
-    const second = p.assets.find((asset) => asset.id === m.imageId2);
-    const pair = second && second.id !== primary.id;
-    const swatches = p.info.colors.split(/[·、,，;；/|\n]/).map((s) => s.trim()).filter(Boolean);
-    const colorLabel = (id: string, sourceId?: string) => {
-      const source = p.assets.find((asset) => asset.id === (sourceId || id));
-      return swatches.find((name) => source?.name.includes(name)) || "";
-    };
-    const frame = (image: HTMLImageElement, x: number, y: number,
-      width: number, height: number, label: string) => {
-      ctx.fillStyle = palette.white;
-      rounded(x, y, width, height, bedding ? 30 : 0);
-      ctx.fill();
-      photoFrame(image, x, y, width, height - (label ? 64 : 0), true);
-      if (label) copy(label, x + 16, y + height - 49, width - 32, 42,
-        main ? 30 : 26, { size: main ? 30 : 26, align: "center", weight: 500 });
-    };
-    if (pair) {
-      const img2 = await picture(second.url);
-      if (main) {
-        const gap = 20, x = 28, width = (w - x * 2 - gap) / 2;
-        frame(img, x, 292, width, h - 344,
-          colorLabel(primary.id, m.sourceImageId));
-        frame(img2, x + width + gap, 292, width, h - 344,
-          colorLabel(second.id, m.sourceImageId2));
-      } else {
-        const top = 268, gap = 18, height = (h - top - 42 - gap) / 2;
-        frame(img, pad, top, inner, height, colorLabel(primary.id, m.sourceImageId));
-        frame(img2, pad, top + height + gap, inner, height,
-          colorLabel(second.id, m.sourceImageId2));
-      }
-    } else frame(img, pad, main ? 284 : 265, inner,
-      h - (main ? 330 : 307), colorLabel(primary.id, m.sourceImageId));
-    return;
-  }
+  const labelFor = (assetId: string, sourceId?: string) => {
+    const asset = p.assets.find((item) => item.id === (sourceId || assetId));
+    return asset && ["被套", "床单", "枕套"].includes(asset.role) ? asset.role : "";
+  };
+  const inset = (x: number, y: number, width: number, height = width, fit = false) => {
+    if (!second) return;
+    rect(x - 8, y - 8, width + 16, height + 16, palette.white);
+    photoFrame(second, x, y, width, height, fit);
+  };
+  const caption = (top: number, height: number, subtitle = m.subtitle, centered = false) => {
+    rect(0, top, w, height, palette.paper);
+    if (composition !== "minimal") rect(pad, top + 21, main ? 48 : 38, 4, palette.accent);
+    const titleTop = top + (composition === "minimal" ? 23 : 38);
+    const titleHeight = subtitle ? height - (main ? 96 : 85) : height - 56;
+    const bottom = copy(m.title, pad, titleTop, inner, Math.max(52, titleHeight), main ? 62 : 53, {
+      weight: 700, leading: 1.15, align: centered ? "center" : "left",
+    });
+    if (subtitle) copy(subtitle, pad, bottom + 11, inner, Math.max(34, top + height - bottom - 28), main ? 28 : 26, {
+      color: palette.muted, align: centered ? "center" : "left", leading: 1.3,
+    });
+  };
 
   if (main && section === "hero") {
-    photo(0, 0, w, h);
-    const fade = ctx.createLinearGradient(0, 0, 0, h * 0.27);
-    fade.addColorStop(0, bedding ? "#fff9edda" : "#fff9eeef");
-    fade.addColorStop(0.58, bedding ? "#fff9ed94" : "#fff9eec2");
-    fade.addColorStop(1, "#fff9ee00");
-    ctx.fillStyle = fade;
-    ctx.fillRect(0, 0, w, h * 0.27);
-    brand();
+    const split = composition === "split";
+    photo(0, 0, w, split ? h - 252 : h);
+    if (split) rect(0, h - 252, w, 252, palette.paper);
+    else fade(0, h * (composition === "minimal" ? 0.23 : 0.27), false, composition === "immersive" ? "d9" : "ed");
+    brand(false);
     const titleX = w * 0.27, titleWidth = w - titleX - pad;
-    const bottom = copy(m.title, titleX, 40, titleWidth, 180, 82, {
-      size: 82, min: 33, weight: 700, align: "right", leading: 1.08,
+    const titleTop = split ? h - 228 : 40;
+    const bottom = copy(m.title, titleX, titleTop, titleWidth, split ? 145 : 180, composition === "minimal" ? 74 : 82, {
+      min: 33, weight: 700, align: "right", leading: 1.08,
     });
     const claims = m.subtitle.trim() ? m.subtitle.split(/[·\n；;]/).map((value) => value.trim()) : points;
-    pills(claims, titleX, Math.min(bottom + 15, 228), titleWidth, 29);
-    return;
-  }
-  if (main && section === "scene") {
-    photo(0, 0, w, h);
-    brand(true);
-    const boxWidth = bedding ? inner * 0.75 : inner * 0.82;
-    ctx.fillStyle = palette.paper + "ed";
-    rounded(pad - 20, h - 256, boxWidth + 40, 221, bedding ? 24 : 0);
-    ctx.fill();
-    const bottom = copy(m.title, pad, h - 236, boxWidth, 116, 64, {
-      size: 64, min: 32, weight: 700, leading: 1.15,
-    });
-    copy(m.subtitle, pad, bottom + 14, boxWidth, h - bottom - 61, 29,
-      { size: 30, color: palette.muted });
-    return;
-  }
-  if (section === "components") {
-    header(main ? 260 : 248, true);
-    const second = p.assets.find((asset) => asset.id === m.imageId2 && asset.id !== primary.id);
-    const labelFor = (id: string, sourceId?: string) => {
-      const asset = p.assets.find((item) => item.id === (sourceId || id));
-      return asset && ["被套", "床单", "枕套"].includes(asset.role) ? asset.role : "";
-    };
-    const labels = [labelFor(primary.id, m.sourceImageId), second ? labelFor(second.id, m.sourceImageId2) : ""];
-    const top = main ? 278 : 268, gap = 20;
-    const component = (image: HTMLImageElement, x: number, y: number,
-      width: number, height: number, label: string) => {
-      const caption = label ? 57 : 0;
-      photoFrame(image, x, y, width, height - caption, true);
-      if (label) copy(label, x, y + height - 44, width, 42, main ? 30 : 26,
-        { size: main ? 30 : 26, align: "center", weight: 500 });
-    };
-    if (second) {
-      const image2 = await picture(second.url);
-      if (main) {
-        const width = (inner - gap) / 2;
-        component(img, pad, top, width, h - top - 44, labels[0]);
-        component(image2, pad + width + gap, top, width, h - top - 44, labels[1]);
-      } else {
-        const height = (h - top - 44 - gap) / 2;
-        component(img, pad, top, inner, height, labels[0]);
-        component(image2, pad, top + height + gap, inner, height, labels[1]);
-      }
-    } else component(img, pad, top, inner, h - top - 44, labels[0]);
-    return;
-  }
-  if (section === "filling") {
-    const head = main ? 272 : 260;
-    header(head);
-    line(head - 7);
-    // Contain the supplied photo so thickness and the edges stay visible.
-    // An absent filling photo is an ordinary product photo, never a fabricated cutaway.
-    photoFrame(img, pad, head + 20, inner, h - head - 54, true, 0);
-    return;
-  }
-  if (section === "pattern") {
-    header(256, true);
-    const benefits = points.slice(0, 4);
-    const rowCount = Math.ceil(benefits.length / 2);
-    const gap = 14, cardWidth = (inner - gap) / 2;
-    benefits.forEach((point, index) => {
-      const x = pad + (index % 2) * (cardWidth + gap);
-      const y = 269 + Math.floor(index / 2) * 71;
-      ctx.fillStyle = ["#eed2c1", "#dae1c9", "#eee0ab", "#e7d7be"][index];
-      rounded(x, y, cardWidth, 57, 28);
-      ctx.fill();
-      copy(point, x + 17, y + 12, cardWidth - 34, 36, 24,
-        { size: 24, min: 13, weight: 500, align: "center" });
-    });
-    const top = 274 + rowCount * 71;
-    photoFrame(img, pad, top, inner, h - top - 37, false, 34);
-    return;
-  }
-  if (section === "benefits") {
-    const items = points.slice(0, bedding ? 4 : 6);
-    const duplicates = m.subtitle.split(/[·\n；;]/).map((value) => value.trim()).filter(Boolean);
-    header(238, true, duplicates.length && duplicates.every((value) => points.includes(value)) ? "" : m.subtitle);
-    const cols = Math.min(bedding ? 2 : 3, items.length);
-    const rows = cols ? Math.ceil(items.length / cols) : 0;
-    const gap = 14, cardH = bedding ? 143 : 137, top = 248;
-    items.forEach((point, index) => {
-      const cardW = (inner - gap * (cols - 1)) / cols;
-      const x = pad + (index % cols) * (cardW + gap);
-      const y = top + Math.floor(index / cols) * (cardH + gap);
-      if (bedding) {
-        ctx.fillStyle = ["#eed2c1", "#dae1c9", "#eee0ab", "#e7d7be"][index];
-        rounded(x, y, cardW, cardH, 20);
-        ctx.fill();
-      }
-      // Decorative textile-like linework, without certification or feature symbols.
-      const cx = x + cardW / 2, cy = y + 31;
-      ctx.strokeStyle = palette.accent;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.roundRect(cx - 20, cy - 18, 40, 36, 7);
-      ctx.moveTo(cx - 10, cy - 18);
-      ctx.lineTo(cx - 10, cy + 18);
-      ctx.moveTo(cx + 10, cy - 18);
-      ctx.lineTo(cx + 10, cy + 18);
-      ctx.moveTo(cx - 20, cy);
-      ctx.lineTo(cx + 20, cy);
-      ctx.stroke();
-      copy(point, x + 12, y + 67, cardW - 24, cardH - 70, 27,
-        { size: 27, min: 15, weight: 500, align: "center" });
-    });
-    const photoY = rows ? top + rows * (cardH + gap) + 7 : top;
-    photoFrame(img, bedding ? pad : 0, photoY, bedding ? inner : w,
-      h - photoY - (bedding ? 34 : 0));
-    return;
-  }
-  if (main) {
-    const head = 260;
-    header(head, bedding);
-    if (bedding) photoFrame(img, pad, head + 16, inner, h - head - 51);
-    else {
-      line(head - 6);
-      photo(0, head + 17, w, h - head - 17);
-    }
-    return;
-  }
-  if (section === "hero") {
-    header(298, bedding);
-    if (bedding) photoFrame(img, 28, 307, w - 56, h - 337, false, 38);
-    else {
-      line(286);
-      photo(0, 308, w, h - 308);
-    }
-    return;
-  }
-  if (section === "care") {
-    header(256);
-    const care = p.info.care.trim();
-    const photoHeight = care ? Math.min(585, h * 0.49) : h - 280;
-    photoFrame(img, bedding ? pad : 0, 270, bedding ? inner : w, photoHeight);
-    if (care) {
-      const y = 270 + photoHeight;
-      ctx.fillStyle = "#ebe2d5";
-      ctx.fillRect(pad, y + 26, inner, h - y - 52);
-      copy(care, pad + 26, y + 51, inner - 52, h - y - 95, 29, {
-        size: 29, min: 15, color: palette.ink,
+    if (composition === "minimal") {
+      copy(claims.filter(Boolean).slice(0, 2).join(" · "), titleX, Math.min(bottom + 15, 234), titleWidth, 53, 29, {
+        color: palette.muted, align: "right", min: 20,
       });
+    } else pills(claims, titleX, Math.min(bottom + 15, split ? h - 72 : 228), titleWidth, 29);
+    return;
+  }
+
+  if (section === "hero") {
+    if (composition === "split") {
+      const band = 248;
+      photo(0, 0, w, h - band);
+      brand();
+      caption(h - band, band, m.subtitle, true);
+    } else if (composition === "minimal") {
+      photo(0, 0, w, h - 169);
+      brand();
+      caption(h - 169, 169, m.subtitle);
+    } else {
+      photo(0, 0, w, h);
+      fade(0, Math.min(408, h * 0.35), false, composition === "immersive" ? "dc" : "f0");
+      brand(false);
+      const bottom = copy(m.title, pad, 103, inner, 171, 66, {
+        min: 32, weight: 700, leading: 1.12,
+      });
+      copy(m.subtitle, pad, bottom + 17, inner * 0.9, 88, 28, { color: palette.muted, min: 22 });
     }
     return;
   }
-  if (section === "craft") {
-    if (bedding) {
-      header(258, true);
-      photoFrame(img, pad, 270, inner, h - 307);
+
+  if (section === "scene") {
+    photo(0, 0, w, h);
+    brand();
+    if (composition === "immersive") {
+      fade(h - 290, 290, true);
+      const bottom = copy(m.title, pad, h - 196, inner, 115, main ? 64 : 58, { weight: 700, min: 28, leading: 1.15 });
+      copy(m.subtitle, pad, bottom + 12, inner, Math.max(34, h - bottom - 26), main ? 28 : 26, { color: palette.muted });
+    } else if (composition === "split") {
+      caption(h - 242, 242);
+    } else if (composition === "minimal") {
+      caption(h - 155, 155);
+    } else {
+      const boxWidth = main ? w * 0.66 : w * 0.86;
+      const top = h - 205;
+      ctx.fillStyle = palette.paper + "ed";
+      rounded(pad - 18, top, boxWidth + 36, 176, 4);
+      ctx.fill();
+      const bottom = copy(m.title, pad, top + 22, boxWidth, 91, main ? 59 : 50, { min: 28, weight: 700, leading: 1.15 });
+      copy(m.subtitle, pad, bottom + 10, boxWidth, Math.max(34, top + 153 - bottom), main ? 27 : 25, { color: palette.muted });
+    }
+    return;
+  }
+
+  if (section === "benefits") {
+    photo(0, 0, w, h);
+    brand();
+    const items = points.slice(0, 3);
+    if (composition === "minimal") {
+      caption(h - 185, 185, items.join(" · ") || m.subtitle);
+    } else if (composition === "immersive") {
+      fade(h - 364, 364, true);
+      const bottom = copy(m.title, pad, h - 271, inner, 96, main ? 64 : 55, { weight: 700 });
+      copy(items.join(" · ") || m.subtitle, pad, bottom + 14, inner, Math.max(66, h - bottom - 39), main ? 32 : 28, { color: palette.muted });
+    } else {
+      // The photograph continues behind a narrow editorial panel, rather than a repeated icon grid.
+      const x = w * 0.65, top = h * 0.25, width = w - x;
+      rect(x, top, width, h - top, palette.paper + "f3");
+      const insetPad = main ? 31 : 24;
+      rect(x + insetPad, top + 33, 36, 4, palette.accent);
+      const titleBottom = copy(m.title, x + insetPad, top + 57, width - insetPad * 2, 156, main ? 54 : 43, {
+        min: 26, weight: 700, leading: 1.18,
+      });
+      const contentTop = titleBottom + 31;
+      if (items.length) {
+        const slot = (h - contentTop - 36) / items.length;
+        items.forEach((point, index) => {
+          const y = contentTop + index * slot;
+          if (index) rect(x + insetPad, y - 13, width - insetPad * 2, 1, palette.muted + "45");
+          copy(point, x + insetPad, y + 7, width - insetPad * 2, slot - 32, main ? 31 : 27, {
+            min: 22, leading: 1.35,
+          });
+        });
+      } else copy(m.subtitle, x + insetPad, contentTop, width - insetPad * 2, h - contentTop - 31, main ? 30 : 26, { color: palette.muted });
+    }
+    return;
+  }
+
+  if (section === "colors") {
+    const names = p.info.colors.split(/[·、,，;；/|\n]/).map((value) => value.trim()).filter(Boolean);
+    const colorLabel = (id: string, sourceId?: string) => {
+      const asset = p.assets.find((item) => item.id === (sourceId || id));
+      return names.find((name) => asset?.name.includes(name)) || "";
+    };
+    const label = (value: string, x: number, y: number, width: number) => {
+      if (!value) return;
+      rect(x, y, width, 61, palette.paper + "ee");
+      copy(value, x + 17, y + 16, width - 34, 38, main ? 28 : 26, { weight: 500 });
+    };
+    if (second && secondAsset) {
+      if (main && composition !== "immersive") {
+        photo(0, 0, w, h * 0.72);
+        brand();
+        const side = w * 0.405, x = w - side - 35, y = h - side - 40;
+        inset(x, y, side, side, true);
+        const textWidth = x - pad - 28;
+        copy(m.title, pad, h - 268, textWidth, 151, 61, { weight: 700, min: 30, leading: 1.15 });
+        copy(m.subtitle, pad, h - 95, textWidth, 61, 27, { color: palette.muted, min: 20 });
+        label(colorLabel(primary.id, m.sourceImageId), pad, h * 0.72 - 70, w * 0.4);
+        label(colorLabel(secondAsset.id, m.sourceImageId2), x, y + side - 61, side);
+      } else {
+        const divider = composition === "minimal" ? 135 : 161;
+        const firstHeight = (h - divider) / 2;
+        photo(0, 0, w, firstHeight);
+        brand();
+        label(colorLabel(primary.id, m.sourceImageId), pad, firstHeight - 68, inner);
+        caption(firstHeight, divider, m.subtitle, true);
+        photoFrame(second, 0, firstHeight + divider, w, h - firstHeight - divider);
+        label(colorLabel(secondAsset.id, m.sourceImageId2), pad, h - 71, inner);
+      }
+    } else {
+      photo(0, 0, w, h);
+      brand();
+      caption(h - (main ? 198 : 180), main ? 198 : 180, m.subtitle);
+      label(colorLabel(primary.id, m.sourceImageId), pad, h - (main ? 278 : 260), Math.min(inner, w * 0.45));
+    }
+    return;
+  }
+
+  // Texture, construction and components use photographic evidence. A second
+  // frame is only drawn when the user selected another distinct original photo.
+  if (["texture", "pattern", "craft", "filling", "components"].includes(section)) {
+    const component = section === "components";
+    if (composition === "auto" && ["texture", "pattern", "craft"].includes(section)) {
+      photo(0, 0, w, h);
+      const side = main ? 320 : 224;
+      if (second) inset(w - side - pad, h - side - 256, side);
+      if (section === "texture") {
+        brand();
+        const top = h - 213, width = main ? inner * 0.71 : inner * 0.88;
+        rect(pad - 17, top, width + 34, 184, palette.paper + "ef");
+        rect(pad, top + 21, 39, 4, palette.accent);
+        const bottom = copy(m.title, pad, top + 39, width, 88, main ? 61 : 52, {
+          min: 28, weight: 700, leading: 1.15,
+        });
+        copy(m.subtitle, pad, bottom + 12, width, Math.max(34, top + 158 - bottom), main ? 28 : 26, { color: palette.muted });
+      } else {
+        fade(0, section === "pattern" ? 364 : 320, false, "ee");
+        brand(false);
+        const centered = section === "pattern";
+        const bottom = copy(m.title, pad, main ? 112 : 95, inner, 133, main ? 64 : 55, {
+          min: 30, weight: 700, leading: 1.15, align: centered ? "center" : "left",
+        });
+        copy(m.subtitle, pad, bottom + 15, inner, 83, main ? 28 : 26, {
+          color: palette.muted, align: centered ? "center" : "left",
+        });
+      }
       return;
     }
-    photo(0, 0, w, h - 263);
-    brand(true);
-    ctx.fillStyle = palette.paper;
-    ctx.fillRect(0, h - 263, w, 263);
-    ctx.fillStyle = palette.accent;
-    ctx.fillRect(pad, h - 236, 60, 5);
-    const bottom = copy(m.title, pad, h - 208, inner, 128, 57, {
-      size: 57, min: 32, weight: 700, leading: 1.18,
-    });
-    copy(m.subtitle, pad, bottom + 12, inner, h - bottom - 28, 25,
-      { size: 25, min: 20, color: palette.muted });
+    if (composition === "split" && second) {
+      const column = w * 0.64, gap = main ? 12 : 10;
+      photo(0, 0, column, h);
+      photoFrame(second, column + gap, 0, w - column - gap, h * 0.5, component);
+      brand();
+      const x = column + (main ? 31 : 24), width = w - x - (main ? 24 : 20), top = h * 0.5 + 31;
+      rect(column + gap, h * 0.5, w - column - gap, h * 0.5, palette.paper);
+      rect(x, top, 34, 4, palette.accent);
+      const bottom = copy(m.title, x, top + 27, width, h * 0.26, main ? 54 : 43, { min: 26, weight: 700, leading: 1.18 });
+      copy(m.subtitle, x, bottom + 17, width, Math.max(52, h - bottom - 38), main ? 28 : 25, { color: palette.muted, min: 21 });
+      return;
+    }
+    const band = composition === "minimal" ? (main ? 166 : 155) : (main ? 207 : 203);
+    const photoHeight = h - band;
+    photo(0, 0, w, composition === "immersive" ? h : photoHeight);
+    brand();
+    if (second && composition !== "minimal") {
+      const side = main ? 320 : 224;
+      const y = Math.max(152, photoHeight - side - 37);
+      inset(w - side - pad, y, side, component ? side * 0.82 : side, component);
+      const componentLabel = secondAsset && component ? labelFor(secondAsset.id, m.sourceImageId2) : "";
+      if (componentLabel) {
+        rect(w - side - pad, y + side * 0.82 - 54, side, 54, palette.paper + "ed");
+        copy(componentLabel, w - side - pad + 15, y + side * 0.82 - 42, side - 30, 36, main ? 28 : 25, { weight: 500 });
+      }
+    }
+    if (composition === "immersive") {
+      fade(h - band - 91, band + 91, true);
+      const bottom = copy(m.title, pad, h - band + 19, inner, 111, main ? 64 : 54, { weight: 700, min: 28, leading: 1.15 });
+      copy(m.subtitle, pad, bottom + 12, inner, Math.max(34, h - bottom - 25), main ? 28 : 26, { color: palette.muted });
+    } else caption(photoHeight, band);
     return;
   }
-  header(264, bedding);
-  if (bedding) photoFrame(img, pad, 280, inner, h - 317);
-  else {
-    line(264);
-    photo(0, 280, w, h - 280);
+
+  if (section === "care") {
+    const band = main ? 266 : 244;
+    photo(0, 0, w, h - band);
+    brand();
+    caption(h - band, band, p.info.care.trim() || m.subtitle);
+    return;
   }
+  photo(0, 0, w, h - 195);
+  brand();
+  caption(h - 195, 195);
 }
+
 
 export async function drawDesign(
   canvas: HTMLCanvasElement,
@@ -604,7 +622,7 @@ export async function drawDesign(
   };
   if (m.kind === "main") {
     if (m.index === 1) {
-      cover(ctx, img, 0, 0, w, h, m.cropX, m.cropY);
+      cover(ctx, img, 0, 0, w, h, m.cropX, m.cropY, m.imageZoom);
       const fade = ctx.createLinearGradient(0, 0, 0, h * 0.42);
       fade.addColorStop(0, theme.bg);
       fade.addColorStop(0.72, theme.bg + "df");
@@ -629,7 +647,7 @@ export async function drawDesign(
     } else if (m.index === 3) {
       brand();
       header();
-      cover(ctx, img, pad, 302, inner * 0.62, 700, m.cropX, m.cropY);
+      cover(ctx, img, pad, 302, inner * 0.62, 700, m.cropX, m.cropY, m.imageZoom);
       cover(ctx, img2, pad + inner * 0.65, 302, inner * 0.35, 465);
       text("近看细节", pad + inner * 0.65, 815, inner * 0.35, 32);
       if (m.subtitle)
@@ -638,14 +656,14 @@ export async function drawDesign(
     } else if (m.index === 5) {
       brand();
       header();
-      cover(ctx, img, pad, 305, (inner - 24) / 2, 698, m.cropX, m.cropY);
+      cover(ctx, img, pad, 305, (inner - 24) / 2, 698, m.cropX, m.cropY, m.imageZoom);
       cover(ctx, img2, pad + (inner + 24) / 2, 305, (inner - 24) / 2, 698);
       text(p.info.colors || "商品颜色展示", pad, 1045, inner, 29);
       footer();
     } else {
       brand();
       header();
-      cover(ctx, img, pad, 290, inner, h - 425, m.cropX, m.cropY);
+      cover(ctx, img, pad, 290, inner, h - 425, m.cropX, m.cropY, m.imageZoom);
       footer();
     }
   } else {
@@ -674,11 +692,11 @@ export async function drawDesign(
       footer();
     } else if (m.index === 4 || m.index === 5) {
       header(115);
-      cover(ctx, img, pad, 285, inner * 0.6, h - 450, m.cropX, m.cropY);
+      cover(ctx, img, pad, 285, inner * 0.6, h - 450, m.cropX, m.cropY, m.imageZoom);
       cover(ctx, img2, pad + inner * 0.63, 365, inner * 0.37, h - 540);
       footer();
     } else if (m.index === 7) {
-      cover(ctx, img, 0, 0, w, h - 260, m.cropX, m.cropY);
+      cover(ctx, img, 0, 0, w, h - 260, m.cropX, m.cropY, m.imageZoom);
       ctx.fillStyle = theme.bg;
       ctx.fillRect(0, h - 260, w, 260);
       text(m.title, w / 2, h - 210, inner, 48, "center", true);
@@ -687,7 +705,7 @@ export async function drawDesign(
     } else {
       header(118);
       const y = 285;
-      cover(ctx, img, pad, y, inner, h - y - 118, m.cropX, m.cropY);
+      cover(ctx, img, pad, y, inner, h - y - 118, m.cropX, m.cropY, m.imageZoom);
       footer();
     }
   }

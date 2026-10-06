@@ -13,7 +13,7 @@ const { outputText } = ts.transpileModule(source, {
     module: ts.ModuleKind.ES2022,
   },
 });
-const { normalizeModelBase, customAPIEndpoint, providerError, inspectModelList, defaultTextModel } =
+const { normalizeModelBase, customAPIEndpoint, providerError, inspectModelList, defaultTextModel, imageRequestParameters } =
   await import(
     "data:text/javascript;base64," + Buffer.from(outputText).toString("base64")
   );
@@ -148,4 +148,41 @@ test("text model migration retains old settings and only initializes the existin
   } finally {
     database.close();
   }
+});
+
+test("image request sizes support B.AI GPT Image 2 portrait material while keeping unknown providers square", () => {
+  const bai = { baseUrl: "https://api.b.ai/v1", model: "gpt-image-2" };
+  assert.deepEqual(imageRequestParameters(bai), { size: "1024x1024" });
+  assert.deepEqual(imageRequestParameters(bai, { kind: "detail" }), { size: "1024x1536" });
+  assert.deepEqual(imageRequestParameters({ ...bai, imageQuality: "high", imageResolution: "2k" }, { kind: "main" }), { size: "2048x2048", quality: "high" });
+  assert.deepEqual(imageRequestParameters({ ...bai, imageQuality: "high", imageResolution: "2k" }, { kind: "detail" }), { size: "1536x2048", quality: "high" });
+  for (const settings of [
+    { ...bai, baseUrl: "https://api.b.ai.example.com/v1" },
+    { ...bai, baseUrl: "https://other.example.com/v1" },
+    { ...bai, model: "different-custom-model" },
+  ]) {
+    assert.deepEqual(imageRequestParameters(settings, { kind: "detail" }), { size: "1024x1024" });
+    assert.deepEqual(imageRequestParameters({ ...settings, imageResolution: "2k", imageQuality: "auto" }, { kind: "detail" }), { size: "2048x2048" });
+  }
+});
+
+test("image-quality migration preserves credentials and uses conservative defaults for existing configurations", async () => {
+  const database = new DatabaseSync(":memory:");
+  try {
+    database.exec(await readFile(new URL("../drizzle/0001_clammy_leech.sql", import.meta.url), "utf8"));
+    database.prepare("INSERT INTO model_settings VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+      "existing-owner", "custom", "https://api.b.ai/v1", "gpt-image-2", "opaque-encrypted-key", "1234", "old-date",
+    );
+    for (const migration of ["0002_copy_model.sql", "0003_copy_model_id.sql", "0004_image_quality.sql"])
+      database.exec(await readFile(new URL(`../drizzle/${migration}`, import.meta.url), "utf8"));
+    const row = database.prepare("SELECT * FROM model_settings").get();
+    assert.equal(row.image_quality, "auto");
+    assert.equal(row.image_resolution, "1k");
+    assert.equal(row.encrypted_key, "opaque-encrypted-key");
+    assert.equal(row.model, "gpt-image-2");
+    assert.equal(row.text_model, "deepseek-v4.1-flash");
+    assert.equal(row.updated_at, "old-date");
+    assert.throws(() => database.prepare("UPDATE model_settings SET image_quality = ?").run("unsupported"));
+    assert.throws(() => database.prepare("UPDATE model_settings SET image_resolution = ?").run("4k"));
+  } finally { database.close(); }
 });

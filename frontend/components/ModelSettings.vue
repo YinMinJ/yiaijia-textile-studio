@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Check, CircleHelp, FlaskConical, KeyRound, LoaderCircle, PlugZap, Save, ShieldCheck } from "@lucide/vue";
+import type { ImageQuality, ImageResolution } from "../../lib/model-connection";
 
 type Configuration = {
   configured: boolean;
@@ -8,6 +9,8 @@ type Configuration = {
   baseUrl?: string;
   model?: string;
   textModel?: string;
+  imageQuality?: ImageQuality;
+  imageResolution?: ImageResolution;
   keyHint?: string;
 };
 
@@ -24,6 +27,8 @@ const emit = defineEmits<{
 const baseUrl = ref("");
 const imageModel = ref("");
 const textModel = ref("");
+const imageQuality = ref<ImageQuality>("auto");
+const imageResolution = ref<ImageResolution>("1k");
 const apiKey = ref("");
 const keyHint = ref("");
 const configured = ref(false);
@@ -35,6 +40,16 @@ const savedMessage = ref("");
 const testImage = ref("");
 const controller = new AbortController();
 const locked = computed(() => props.busy || !!busyMessage.value || loading.value);
+const imageSizeHint = computed(() => {
+  const square = imageResolution.value === "2k" ? "2048 × 2048" : "1024 × 1024";
+  try {
+    if (new URL(baseUrl.value).hostname === "api.b.ai" && imageModel.value.toLowerCase() === "gpt-image-2") {
+      const portrait = imageResolution.value === "2k" ? "1536 × 2048" : "1024 × 1536";
+      return `主图 ${square}，详情摄影素材 ${portrait}。实际返回尺寸以服务商为准。`;
+    }
+  } catch { /* An unfinished URL is still editable. */ }
+  return `摄影素材请求 ${square}；自定义服务商需支持所选尺寸。`;
+});
 let disposed = false;
 
 function clearResults() {
@@ -84,6 +99,8 @@ async function loadConfiguration() {
     baseUrl.value = data.configured ? data.baseUrl || "" : "";
     imageModel.value = data.configured ? data.model || "" : "";
     textModel.value = data.configured ? data.textModel || "" : "";
+    imageQuality.value = data.imageQuality || "auto";
+    imageResolution.value = data.imageResolution || "1k";
     keyHint.value = data.configured ? data.keyHint || "" : "";
     emit("configured", data.configured);
   } catch (caught) {
@@ -114,6 +131,8 @@ async function save(): Promise<boolean> {
         baseUrl: baseUrl.value,
         model: imageModel.value,
         textModel: textModel.value,
+        imageQuality: imageQuality.value,
+        imageResolution: imageResolution.value,
         apiKey: apiKey.value,
       }),
     });
@@ -123,6 +142,8 @@ async function save(): Promise<boolean> {
     baseUrl.value = data.baseUrl || "";
     imageModel.value = data.model || "";
     textModel.value = data.textModel || "";
+    imageQuality.value = data.imageQuality || "auto";
+    imageResolution.value = data.imageResolution || "1k";
     keyHint.value = data.keyHint || "";
     apiKey.value = "";
     emit("configured", true);
@@ -232,6 +253,28 @@ onBeforeUnmount(() => {
           </label>
         </div>
 
+        <div class="model-fields">
+          <label class="settings-field">
+            <span>图片质量</span>
+            <select v-model="imageQuality" :disabled="locked" @change="clearResults">
+              <option value="auto">自动 · 服务商默认</option>
+              <option value="high">高 · 细节优先</option>
+              <option value="medium">中 · 平衡质量与速度</option>
+              <option value="low">低 · 快速预览</option>
+            </select>
+            <small>自动档不额外发送 quality；其余档位需服务商支持。</small>
+          </label>
+          <label class="settings-field">
+            <span>摄影素材尺寸</span>
+            <select v-model="imageResolution" :disabled="locked" @change="clearResults">
+              <option value="1k">1K · 常规</option>
+              <option value="2k">2K · 精细</option>
+            </select>
+            <small>{{ imageSizeHint }}</small>
+          </label>
+        </div>
+        <p class="quality-note">高质量与 2K 素材可能需要数分钟，也会增加费用，请保持页面打开。更换服务商后，请确认其支持所选 quality 和 size 参数。</p>
+
         <label class="settings-field">
           <span>API Key <span v-if="configured && keyHint" class="saved-key">已保存 · 末四位 {{ keyHint }}</span></span>
           <input v-model="apiKey" type="password" :disabled="locked" autocomplete="new-password" :spellcheck="false" :placeholder="configured ? '留空即可保留当前密钥' : '输入服务商提供的 API Key'" @input="clearResults" />
@@ -287,14 +330,15 @@ onBeforeUnmount(() => {
 .card-heading p { margin: 0; color: var(--muted, #858581); font-size: 12px; }
 .settings-field { display: grid; gap: 9px; margin-bottom: 23px; }
 .settings-field > span { font-size: 13px; font-weight: 500; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.settings-field input { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; color: var(--ink, #242422); border: 1px solid var(--border, #e9e8e4); border-radius: 9px; background: #fcfcfa; padding: 13px 14px; outline: none; transition: border-color .15s, box-shadow .15s; }
-.settings-field input:focus { border-color: var(--accent, #e77843); box-shadow: 0 0 0 3px #e7784310; }
+.settings-field input, .settings-field select { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; color: var(--ink, #242422); border: 1px solid var(--border, #e9e8e4); border-radius: 9px; background: #fcfcfa; padding: 13px 14px; outline: none; transition: border-color .15s, box-shadow .15s; }
+.settings-field input:focus, .settings-field select:focus { border-color: var(--accent, #e77843); box-shadow: 0 0 0 3px #e7784310; }
 .settings-field input::placeholder { color: #aba9a3; }
-.settings-field input:disabled { opacity: .6; cursor: not-allowed; }
+.settings-field input:disabled, .settings-field select:disabled { opacity: .6; cursor: not-allowed; }
 .settings-field small { display: flex; align-items: flex-start; gap: 5px; font-size: 11px; color: var(--muted, #858581); line-height: 1.6; }
 .settings-field small svg { flex-shrink: 0; margin-top: 2px; }
 .saved-key { color: #7c8c80; font-size: 11px; font-weight: 400; }
 .model-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.quality-note { margin: -8px 0 23px; padding: 10px 12px; border-radius: 8px; background: #f7f6f2; color: var(--muted, #858581); font-size: 11px; line-height: 1.7; }
 .settings-actions { display: flex; flex-wrap: wrap; gap: 10px; padding-top: 4px; }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid transparent; border-radius: 9px; padding: 12px 18px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; line-height: 1.4; text-decoration: none; transition: background .15s, transform .15s; }
 .button.primary { color: #fff; background: var(--accent, #e77843); }

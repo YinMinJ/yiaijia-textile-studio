@@ -19,6 +19,7 @@ const migrations = [
   "0001_clammy_leech.sql",
   "0002_copy_model.sql",
   "0003_copy_model_id.sql",
+  "0004_image_quality.sql",
 ] as const;
 
 const databaseState = globalThis as typeof globalThis & {

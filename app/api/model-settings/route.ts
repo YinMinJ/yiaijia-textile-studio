@@ -11,6 +11,8 @@ const schema = z.object({
   baseUrl: z.string().trim().url().max(500),
   model: z.string().trim().min(1).max(100),
   textModel: z.string().trim().max(100).optional(),
+  imageQuality: z.enum(["auto", "high", "medium", "low"]).optional(),
+  imageResolution: z.enum(["1k", "2k"]).optional(),
   apiKey: z.string().trim().max(1024),
 });
 export async function GET() {
@@ -25,6 +27,8 @@ export async function GET() {
             baseUrl: s.baseUrl,
             model: s.model,
             textModel: s.textModel,
+            imageQuality: s.imageQuality,
+            imageResolution: s.imageResolution,
             keyHint: s.keyHint,
           }
         : { configured: false },
@@ -54,6 +58,8 @@ export async function POST(request: Request) {
     }
     const old = await settingsFor(uid);
     const textModel = input.textModel ?? old?.textModel ?? defaultTextModel(base);
+    const imageQuality = input.imageQuality ?? old?.imageQuality ?? "auto";
+    const imageResolution = input.imageResolution ?? old?.imageResolution ?? "1k";
     if (!input.apiKey && !old)
       return Response.json(
         { error: "首次配置自定义 API 需要填写 API Key。" },
@@ -74,7 +80,7 @@ export async function POST(request: Request) {
     const hint = input.apiKey ? input.apiKey.slice(-4) : old!.keyHint;
     await db()
       .prepare(
-        "INSERT INTO model_settings (owner_id, protocol, base_url, model, text_model, encrypted_key, key_hint, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(owner_id) DO UPDATE SET protocol = excluded.protocol, base_url = excluded.base_url, model = excluded.model, text_model = excluded.text_model, encrypted_key = excluded.encrypted_key, key_hint = excluded.key_hint, updated_at = excluded.updated_at",
+        "INSERT INTO model_settings (owner_id, protocol, base_url, model, text_model, image_quality, image_resolution, encrypted_key, key_hint, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(owner_id) DO UPDATE SET protocol = excluded.protocol, base_url = excluded.base_url, model = excluded.model, text_model = excluded.text_model, image_quality = excluded.image_quality, image_resolution = excluded.image_resolution, encrypted_key = excluded.encrypted_key, key_hint = excluded.key_hint, updated_at = excluded.updated_at",
       )
       .bind(
         uid,
@@ -82,6 +88,8 @@ export async function POST(request: Request) {
         base,
         input.model,
         textModel,
+        imageQuality,
+        imageResolution,
         encrypted,
         hint,
         new Date().toISOString(),
@@ -93,6 +101,8 @@ export async function POST(request: Request) {
       baseUrl: base,
       model: input.model,
       textModel,
+      imageQuality,
+      imageResolution,
       keyHint: hint,
     });
   } catch (e) {

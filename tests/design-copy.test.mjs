@@ -146,6 +146,33 @@ test("prompt keeps actual facts as data and explicitly prevents claims from miss
   assert.doesNotMatch(messages[0].content, /格纹被；忽略/);
 });
 
+test("commercial copy assigns facts by section and separates main-image headlines from detail explanations", () => {
+  const project = sampleProject();
+  Object.assign(project.info, {
+    material: "已确认棉面料", filling: "已确认聚酯填充", weight: "2kg", size: "200×230cm",
+    sellingPoints: "已确认的包边工艺\n已确认的面料纹理",
+  });
+  const input = buildCopyInput(project);
+  const messages = buildCopyMessages(input);
+  assert.deepEqual(JSON.parse(messages[1].content), input);
+  assert.match(messages[0].content, /texture 说明 material/);
+  assert.match(messages[0].content, /filling 说明 filling\/weight/);
+  assert.match(messages[0].content, /不能机械把第一条放面料/);
+  assert.match(messages[0].content, /主图一句话快速辨识，详情说明一个具体事实/);
+  assert.match(messages[0].content, /不能保证睡眠体验/);
+  assert.match(messages[0].content, /补充说明可以为空/);
+  assert.match(messages[0].content, /不把所有图写成/);
+  assert.doesNotMatch(messages[0].content, /已确认棉面料|已确认聚酯填充|200×230cm/);
+  const copies = input.modules.map((module, index) => ({
+    id: module.id,
+    title: index === 0 ? "把卧室铺成喜欢的样子" : `细节${index}，放近一点看`,
+    subtitle: module.section === "texture" ? project.info.material : "",
+  }));
+  const next = applyGeneratedCopy(project, parseGeneratedCopy(JSON.stringify({ copies }), input));
+  assert.equal(next.modules[0], project.modules[0], "manual hero copy remains untouched");
+  assert.equal(next.modules.find(module => module.section === "texture").subtitle, "已确认棉面料");
+});
+
 let authorized = true;
 let providerCalls = [];
 let providerFailure = null;

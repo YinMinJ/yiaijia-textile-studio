@@ -1,4 +1,36 @@
 export type ImageProtocol = "custom";
+export type ImageQuality = "auto" | "high" | "medium" | "low";
+export type ImageResolution = "1k" | "2k";
+export const IMAGE_GENERATION_TIMEOUT_MS = 360_000;
+// The lease also covers the final image download and local result persistence.
+export const IMAGE_JOB_LEASE_MS = IMAGE_GENERATION_TIMEOUT_MS + 30_000;
+
+export function imageRequestParameters(
+  settings: {
+    baseUrl: string;
+    model: string;
+    imageQuality?: ImageQuality;
+    imageResolution?: ImageResolution;
+  },
+  options: { kind?: "main" | "detail" } = {},
+) {
+  const highResolution = settings.imageResolution === "2k";
+  // Only the verified B.AI GPT Image 2 integration receives portrait sizes.
+  // Other custom services keep the square requests accepted by the old client.
+  const portrait = options.kind === "detail" &&
+    new URL(settings.baseUrl).hostname === "api.b.ai" &&
+    settings.model.toLowerCase() === "gpt-image-2";
+  const size = portrait
+    ? highResolution ? "1536x2048" : "1024x1536"
+    : highResolution ? "2048x2048" : "1024x1024";
+  const quality = settings.imageQuality;
+  return {
+    size,
+    ...(quality === "high" || quality === "medium" || quality === "low"
+      ? { quality }
+      : {}),
+  };
+}
 
 export function publicHttps(value: string, allowQuery = false) {
   const url = new URL(value.trim());

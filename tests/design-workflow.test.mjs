@@ -7,7 +7,7 @@ import { z } from "zod";
 import {
   sampleProject, freshProject, makeModules, sourceAsset, needsAI,
   moduleSection, modulePurpose, dimensions, prepareImageRun, usesSecondary,
-  categories, categoryFor, switchCategory, updatePlanModule, updateProjectTemplate,
+  categories, categoryFor, switchCategory, updatePlanModule, updateProjectTemplate, referenceAssets,
 } from "../lib/design-model.ts";
 
 test("quilt plans follow the reference category and keep the correct original photos", () => {
@@ -20,7 +20,7 @@ test("quilt plans follow the reference category and keep the correct original ph
   assert.equal(sourceAsset(p, p.modules.find(m => m.section === "craft")).id, "00229");
   assert.equal(sourceAsset(p, p.modules.find(m => m.section === "scene")).id, "00237");
   assert.ok(p.modules.every(m => m.sourceImageId === m.imageId));
-  assert.ok(p.modules.filter(m => needsAI(p, m)).every(m => ["hero", "scene"].includes(m.section)));
+  assert.ok(p.modules.filter(m => needsAI(p, m)).every(m => ["hero", "scene", "benefits"].includes(m.section)));
 });
 
 test("regeneration uses its original source after a result replaces the displayed photo", () => {
@@ -56,7 +56,7 @@ test("one-image redo keeps other completed photos ready while a first preview le
   const preview = prepareImageRun({ ...p, workflow: "preview" }, p.modules[0].id);
   assert.equal(preview.modules.find(m => m.section === "scene").aiStatus, "pending");
   assert.ok(preview.modules.filter(m => !needsAI(preview, m)).every(m => m.aiStatus === "succeeded"));
-  assert.deepEqual(p.modules.filter(usesSecondary).map(m => m.section), ["colors"]);
+  assert.deepEqual(p.modules.filter(usesSecondary).map(m => m.section), ["filling", "craft", "colors"]);
 });
 
 test("editing plan copy preserves completed images, generation batch and the current workflow", () => {
@@ -190,6 +190,56 @@ test("empty product facts stay empty instead of gaining materials, certificates 
   assert.match(updated.find(m => m.section === "texture").subtitle, /用户确认的面料/);
 });
 
+test("commercial reference bundles preserve the selected color and never use generated images", () => {
+  const p = sampleProject();
+  const hero = p.modules[0];
+  p.assets.unshift({ ...p.assets[0], id: "ai-reference", generated: true });
+  const refs = referenceAssets(p, hero);
+  assert.equal(refs[0].id, hero.sourceImageId);
+  assert.equal(refs.length, 3);
+  assert.ok(refs.every(a => !a.generated && a.name.includes("米白")));
+  assert.equal(new Set(refs.map(a => a.id)).size, refs.length);
+  const gray = { ...hero, sourceImageId: "00237" };
+  assert.ok(referenceAssets(p, gray).every(a => a.name.includes("灰紫")));
+  p.info.colors = "";
+  assert.deepEqual(referenceAssets(p, hero).map(a => a.id), [hero.sourceImageId]);
+  assert.deepEqual(referenceAssets(p, { ...hero, sourceImageId: "missing" }), []);
+});
+
+test("automatic detail comparisons never pair a selected color with another variant or an unidentified photo", () => {
+  const p = sampleProject();
+  const photo = (id, name, role) => ({ id, name, role, url: `/samples/${id}.jpg`, width: 1200, height: 1200 });
+  p.assets = [
+    photo("white-bed", "米白 · 整体", "整体"),
+    photo("gray-texture", "灰紫 · 面料特写", "细节"),
+    photo("gray-craft", "灰紫 · 包边工艺", "工艺"),
+    photo("white-color", "米白 · 配色", "颜色"),
+    photo("gray-color", "灰紫 · 配色", "颜色"),
+  ];
+  const evidenceModules = project => makeModules(project).filter(m => ["texture", "craft"].includes(m.section));
+  assert.ok(evidenceModules(p).every(m => m.imageId.startsWith("gray-") && m.imageId2 === ""), "gray details must not be accompanied by the only white whole-product photo");
+  p.assets.push(photo("gray-bed", "灰紫 · 整体", "整体"));
+  assert.ok(evidenceModules(p).every(m => m.imageId2 === "gray-bed"), "a confirmed matching variant can accompany its detail");
+  p.assets.find(a => a.id === "gray-bed").name = "未标注颜色的整床实拍";
+  assert.ok(evidenceModules(p).every(m => m.imageId2 === ""), "an unknown color must not be guessed from the asset role");
+  const comparison = makeModules(p).find(m => m.section === "colors");
+  assert.equal(comparison.imageId, "white-color");
+  assert.equal(comparison.imageId2, "gray-color", "the explicitly labeled color-comparison module may show both variants");
+  p.info.colors = "";
+  assert.ok(evidenceModules(p).every(m => m.imageId2 === ""), "missing color facts leave automatic comparisons unset");
+});
+
+test("single-photo plans omit duplicate comparisons and match selling points to their purpose", () => {
+  const p = sampleProject();
+  p.assets = [p.assets[0]];
+  p.info.sellingPoints = "包边走线\n格纹肌理\n两色展示";
+  const modules = makeModules(p);
+  assert.ok(modules.every(m => !m.imageId2));
+  assert.equal(modules.find(m => m.section === "texture").title, "格纹肌理");
+  assert.equal(modules.find(m => m.section === "craft").title, "包边走线");
+});
+
+
 test("category profiles retain the two selected reference links and old projects default to quilt", () => {
   assert.equal(categoryFor({}).id, "quilt");
   assert.equal(categoryFor(freshProject()).id, "quilt");
@@ -203,14 +253,14 @@ test("category profiles retain the two selected reference links and old projects
 test("category roles choose real folded, filling and component photos without inventing set pieces", () => {
   const p = sampleProject();
   p.assets.push(...["叠放", "填充", "工艺", "被套", "床单", "枕套"].map(role => ({
-    ...p.assets[0], id: role, name: role + "实拍", role,
+    ...p.assets[0], id: role, name: "米白 · " + role + "实拍", role,
   })));
   const quilt = makeModules(p);
   assert.equal(quilt.find(m => m.section === "hero").sourceImageId, "叠放");
   assert.equal(quilt.find(m => m.section === "filling").sourceImageId, "填充");
   assert.equal(quilt.find(m => m.section === "craft").sourceImageId, "工艺");
   p.category = "bedding-set";
-  p.info = { ...freshProject().info, name: "花型床上套件", setContents: "被套1件、枕套1件" };
+  p.info = { ...freshProject().info, name: "花型床上套件", colors: "米白", setContents: "被套1件、枕套1件" };
   const bedding = makeModules(p);
   assert.deepEqual(bedding.filter(m => m.kind === "main").map(moduleSection), ["hero", "scene", "texture", "components", "colors"]);
   assert.deepEqual(bedding.filter(m => m.kind === "detail").map(moduleSection), ["hero", "pattern", "texture", "components", "craft", "colors", "specs"]);
@@ -279,6 +329,25 @@ async function loadTs(source) {
 }
 const route = await loadTs(routeSource);
 const post = data => route.POST(new Request("http://localhost/api/projects", { method: "POST", body: JSON.stringify(data) }));
+
+test("changing visual composition preserves generated results and manual hero copy", async () => {
+  heldProjects.clear(); jobs = [];
+  const p = { ...sampleProject(), id: randomUUID(), generation: "ai", workflow: "complete", generationBatch: randomUUID() };
+  p.modules[0] = { ...p.modules[0], title: "我的首图标题", subtitle: "", aiStatus: "succeeded" };
+  const next = updatePlanModule(p, p.modules[0].id, { composition: "immersive", imageZoom: 1.15 });
+  assert.equal(next.generationBatch, p.generationBatch);
+  assert.equal(next.modules[0].title, "我的首图标题");
+  assert.equal(next.modules[0].aiStatus, "succeeded");
+  assert.equal((await post(next)).status, 200);
+  const saved = (await (await route.GET()).json()).projects[0];
+  assert.equal(saved.modules[0].composition, "immersive");
+  assert.equal(saved.modules[0].imageZoom, 1.15);
+  assert.equal(updateProjectTemplate(next, "warm").modules[0].composition, "immersive");
+  assert.equal(updateProjectTemplate(next, "warm").modules[0].imageZoom, 1.15);
+  assert.equal((await post({ ...next, modules: [{ ...next.modules[0], composition: "broken" }] })).status, 400);
+  assert.equal((await post({ ...next, modules: [{ ...next.modules[0], imageZoom: 2.1 }] })).status, 400);
+});
+
 
 test("project save and reload preserve semantic plans, workflow and original references", async () => {
   heldProjects.clear();

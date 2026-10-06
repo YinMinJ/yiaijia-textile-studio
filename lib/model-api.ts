@@ -1,12 +1,14 @@
 import { getEncryptionSecret } from "./server-secrets";
 import { db } from "./server-store";
-import type { ImageProtocol } from "./model-connection";
+import type { ImageProtocol, ImageQuality, ImageResolution } from "./model-connection";
 import {
   publicHttps,
   normalizeModelBase,
   providerError,
   inspectModelList,
   customAPIEndpoint,
+  imageRequestParameters,
+  IMAGE_GENERATION_TIMEOUT_MS,
 } from "./model-connection";
 export { publicHttps, normalizeModelBase } from "./model-connection";
 export type ModelSettings = {
@@ -14,6 +16,8 @@ export type ModelSettings = {
   baseUrl: string;
   model: string;
   textModel: string;
+  imageQuality: ImageQuality;
+  imageResolution: ImageResolution;
   encryptedKey: string;
   keyHint: string;
 };
@@ -61,7 +65,7 @@ async function decryptSecret(value: string, uid: string) {
 export async function settingsFor(uid: string) {
   return db()
     .prepare(
-      "SELECT 'custom' AS protocol, base_url AS baseUrl, model, text_model AS textModel, encrypted_key AS encryptedKey, key_hint AS keyHint FROM model_settings WHERE owner_id = ? AND protocol IN ('custom', 'openai')",
+      "SELECT 'custom' AS protocol, base_url AS baseUrl, model, text_model AS textModel, image_quality AS imageQuality, image_resolution AS imageResolution, encrypted_key AS encryptedKey, key_hint AS keyHint FROM model_settings WHERE owner_id = ? AND protocol IN ('custom', 'openai')",
     )
     .bind(uid)
     .first<ModelSettings>();
@@ -195,7 +199,12 @@ export async function completeCopy(
     throw new CopyAPIError("文案模型没有返回文字，请确认所填模型支持聊天补全接口。");
   return { content: content.trim(), model: settings.textModel };
 }
-export async function editProduct(uid: string, images: File[], prompt: string) {
+export async function editProduct(
+  uid: string,
+  images: File[],
+  prompt: string,
+  options: { kind?: "main" | "detail" } = {},
+) {
   const settings = await settingsFor(uid);
   if (!settings) throw new Error("请先在“自定义 API”中保存兼容图片编辑的接口。");
   const key = await decryptSecret(settings.encryptedKey, uid);
@@ -205,7 +214,9 @@ export async function editProduct(uid: string, images: File[], prompt: string) {
     const form = new FormData();
     form.set("model", settings.model);
     form.set("prompt", prompt);
-    form.set("size", "1024x1024");
+    const parameters = imageRequestParameters(settings, options);
+    form.set("size", parameters.size);
+    if (parameters.quality) form.set("quality", parameters.quality);
     form.set("n", "1");
     for (const [i, file] of images.entries())
       form.append(images.length === 1 ? "image" : "image[]", file, "product-" + i + ".jpg");
@@ -214,7 +225,7 @@ export async function editProduct(uid: string, images: File[], prompt: string) {
       redirect: "error",
       headers: { Authorization: "Bearer " + key },
       body: form,
-      signal: AbortSignal.timeout(150000),
+      signal: AbortSignal.timeout(IMAGE_GENERATION_TIMEOUT_MS),
     });
   } catch (e) {
     if (
@@ -222,7 +233,7 @@ export async function editProduct(uid: string, images: File[], prompt: string) {
       (e as Error).name === "AbortError"
     )
       throw new Error(
-        "图片接口超过150秒未完成。请在服务商后台确认结果后再重试，避免重复计费。",
+        "图片接口超过6分钟未完成。请在服务商后台确认结果后再重试，避免重复计费。",
       );
     throw new Error("无法连接图片API，请检查地址、网络和服务商状态。");
   }

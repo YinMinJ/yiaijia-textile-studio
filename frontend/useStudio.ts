@@ -1,7 +1,7 @@
 import { ref, shallowRef, computed, onMounted, onBeforeUnmount, type Ref } from 'vue';
 import { zip, unzip, strToU8 } from 'fflate';
 import { buildCopyInput, applyGeneratedCopy, preserveHeroCopy, type GeneratedCopy } from '../lib/design-copy';
-import { freshProject, sampleProject, templates, makeModules, dimensions, modulePurpose, needsAI, sourceAsset, usesSecondary, moduleSection, prepareImageRun, categoryFor, switchCategory, updatePlanModule, updateProjectTemplate, type ProductCategory, type Project, type ProductInfo, type Asset, type AssetRole, type DesignModule, type TemplateId } from '../lib/design-model';
+import { freshProject, sampleProject, templates, makeModules, dimensions, modulePurpose, needsAI, sourceAsset, referenceAssets, usesSecondary, moduleSection, prepareImageRun, categoryFor, switchCategory, updatePlanModule, updateProjectTemplate, type ProductCategory, type Project, type ProductInfo, type Asset, type AssetRole, type DesignModule, type TemplateId } from '../lib/design-model';
 import { renderBlob, downloadBlob } from '../lib/design-renderer';
 
 export type View = 'home'|'editor'|'templates'|'works'|'assets'|'settings';
@@ -414,17 +414,28 @@ async function runAI(initial: Project, onlyId?: string) {
         setOutputTab(p.output || "main");
         const targets = p.modules.filter((m) => needsAI(p, m) && (onlyId ? m.id === onlyId : m.aiStatus !== "succeeded"));
         for (const [i, target] of targets.entries()) {
-            setBusy("AI生成 " + (i + 1) + " / " + targets.length + " · 请保持页面打开");
+            setBusy("AI生成 " + (i + 1) + " / " + targets.length + " · 单张可能需要数分钟，请保持页面打开");
             setProgress(Math.round((i / targets.length) * 100));
             try {
                 const a = sourceAsset(p, target);
                 if (!a)
                     throw new Error("这张图缺少原始实拍，请回到内容计划重新选图。");
-                const source = await fetch(a.url);
-                if (!source.ok)
-                    throw new Error("商品素材读取失败。");
                 const form = new FormData();
-                form.append("image", await source.blob(), "product.jpg");
+                const references = referenceAssets(p, target).slice(0, 3);
+                let totalBytes = 0;
+                for (const [referenceIndex, reference] of references.entries()) {
+                    const source = await fetch(reference.url);
+                    if (!source.ok)
+                        throw new Error("第" + (referenceIndex + 1) + "张商品参考素材读取失败。");
+                    const blob = await source.blob();
+                    if (!blob.size || blob.size > 8 * 1024 * 1024)
+                        throw new Error("每张模型参考图需在8MB以内，请更换或缩小素材。");
+                    totalBytes += blob.size;
+                    if (totalBytes > 25 * 1024 * 1024)
+                        throw new Error("模型参考素材总大小超过25MB，请缩小素材。");
+                    const extension = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
+                    form.append("image", blob, "product-" + (referenceIndex + 1) + "." + extension);
+                }
                 form.set("projectId", p.id);
                 form.set("moduleId", target.id);
                 if (onlyId)

@@ -203,6 +203,8 @@ globalThis.fetch = async () => {
   assert.equal(ownSettings.baseUrl, customSettings.baseUrl);
   assert.equal(ownSettings.model, customSettings.model);
   assert.equal(ownSettings.textModel, customSettings.textModel);
+  assert.equal(ownSettings.imageQuality, "auto");
+  assert.equal(ownSettings.imageResolution, "1k");
   assert.equal(ownSettings.keyHint, fakeKey.slice(-4));
   assert.ok(!("apiKey" in ownSettings) && !("encryptedKey" in ownSettings));
   assert.equal((await (await request("/api/model-settings", { cookie: secondCookie })).json()).configured, false);
@@ -217,6 +219,30 @@ globalThis.fetch = async () => {
   const savedSecret = await readFile(path.join(directory, "encryption-secret"), "utf8");
   assert.equal(Buffer.from(savedSecret.trim(), "base64").length, 32);
   pass("自定义 API 完整图片编辑地址及独立文案模型保存、配置隔离、密钥加密及会话 token 哈希存储");
+
+  response = await jsonPost("/api/model-settings", {
+    ...customSettings, apiKey: "", imageQuality: "high", imageResolution: "2k",
+  }, firstCookie);
+  assert.equal(response.status, 200);
+  const highQuality = await response.json();
+  assert.equal(highQuality.imageQuality, "high");
+  assert.equal(highQuality.imageResolution, "2k");
+  assert.equal((await jsonPost("/api/model-settings", { ...customSettings, apiKey: "" }, firstCookie)).status, 200);
+  const unchangedQuality = await (await request("/api/model-settings", { cookie: firstCookie })).json();
+  assert.equal(unchangedQuality.imageQuality, "high");
+  assert.equal(unchangedQuality.imageResolution, "2k");
+  for (const invalid of [{ imageQuality: "ultra" }, { imageResolution: "4k" }]) {
+    assert.equal((await jsonPost("/api/model-settings", { ...customSettings, ...invalid, apiKey: "" }, firstCookie)).status, 400);
+  }
+  assert.equal((await jsonPost("/api/model-settings", {
+    ...customSettings, apiKey: "", imageQuality: "auto", imageResolution: "1k",
+  }, firstCookie)).status, 200);
+  const resetQuality = await (await request("/api/model-settings", { cookie: firstCookie })).json();
+  assert.equal(resetQuality.imageQuality, "auto");
+  assert.equal(resetQuality.imageResolution, "1k");
+  assert.equal(resetQuality.keyHint, fakeKey.slice(-4));
+  await assertNoUpstreamRequests();
+  pass("图片质量与素材尺寸可配置、旧客户端省略时保留、可显式恢复默认、拒绝无效档位且保存不调用上游");
 
   const copyInput = {
     info: project.info,
@@ -300,6 +326,8 @@ globalThis.fetch = async () => {
   assert.equal((await (await request("/api/model-settings", { cookie: firstCookie })).json()).keyHint, fakeKey.slice(-4));
   assert.equal((await (await request("/api/model-settings", { cookie: firstCookie })).json()).model, customSettings.model);
   assert.equal((await (await request("/api/model-settings", { cookie: firstCookie })).json()).textModel, customSettings.textModel);
+  assert.equal((await (await request("/api/model-settings", { cookie: firstCookie })).json()).imageQuality, "auto");
+  assert.equal((await (await request("/api/model-settings", { cookie: firstCookie })).json()).imageResolution, "1k");
   assert.equal((await (await request("/api/model-settings", { cookie: firstCookie })).json()).protocol, "custom");
   assert.equal((await (await request("/api/model-settings", { cookie: secondCookie })).json()).configured, false);
   assert.equal(await readFile(path.join(directory, "encryption-secret"), "utf8"), savedSecret);

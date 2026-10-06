@@ -6,8 +6,10 @@ import {
   checkOrigin,
 } from "@/lib/server-store";
 import { editProduct } from "@/lib/model-api";
+import { IMAGE_JOB_LEASE_MS } from "@/lib/model-connection";
 import type { Project, Asset } from "@/lib/design-model";
-import { categoryFor, moduleSection, needsAI, sourceAsset } from "@/lib/design-model";
+import { needsAI, referenceAssets, sourceAsset } from "@/lib/design-model";
+import { buildProductPrompt, buildPhotographyTestPrompt } from "@/lib/product-photography";
 
 function imageDimensions(bytes: Uint8Array, mime: string) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -65,7 +67,7 @@ export async function POST(request: Request) {
   try {
     checkOrigin(request);
     uid = await owner();
-    if (Number(request.headers.get("content-length") || 0) > 17 * 1024 * 1024)
+    if (Number(request.headers.get("content-length") || 0) > 25 * 1024 * 1024)
       return Response.json({ error: "输入图片过大。" }, { status: 413 });
     const form = await request.formData();
     const images = form
@@ -73,7 +75,7 @@ export async function POST(request: Request) {
       .filter((f): f is File => f instanceof File);
     if (
       !images.length ||
-      images.length > 2 ||
+      images.length > 3 ||
       images.some(
         (f) =>
           f.size > 8 * 1024 * 1024 ||
@@ -81,14 +83,15 @@ export async function POST(request: Request) {
       )
     )
       return Response.json(
-        { error: "请提供1至2张8MB以内的商品图。" },
+        { error: "请提供1至3张8MB以内的商品图。" },
         { status: 400 },
       );
     const test = form.get("test") === "true";
     const projectId = String(form.get("projectId") || "");
     const moduleId = String(form.get("moduleId") || "");
     let p: Project | null = null;
-    let description = "保持原有产品外观，整理光线与背景，保留真实色彩与纹理。";
+    let prompt = buildPhotographyTestPrompt();
+    let imageKind: "main" | "detail" = "main";
     if (!test) {
       const row = await db()
         .prepare("SELECT data FROM projects WHERE id = ? AND owner_id = ?")
@@ -116,39 +119,8 @@ export async function POST(request: Request) {
           { error: "原始参考图已缺失，请先重新选择这张图的实拍素材。" },
           { status: 400 },
         );
-      const section = moduleSection(m);
-      const category = categoryFor(p!);
-      const original = sourceAsset(p!, m)!;
-      const categoryDirection = category.id === "quilt"
-        ? "被子类目：米白、浅驼的自然背景和柔和侧光，展示商品的真实体积、边缘与绗缝。严格保持实拍厚度，不加厚、不增加填充物、不合成填充剖面。"
-        : "床上套件类目：奶油色卧室与柔和暖日光，完整铺床场景呈现花型和搭配。保持原照片中被套、床单、枕套的实际件数、相对位置、印花大小及排列；不新增枕头、靠垫、被褥或其他套件配件。";
-      const vipDirection = categoryDirection + (section === "hero"
-        ? category.id === "quilt" && original.role === "叠放"
-          ? "保留参考照片的叠放形态、层数和拍摄角度，叠被为画面主体；上缘保留少量干净背景供后续短标题排版。"
-          : category.id === "bedding-set"
-            ? "商品铺满主要画面，保留已有翻折反面和真实印花，右上方留出少量干净背景供后续标题排版；不为排版移动或隐藏实际配件。"
-            : "商品占画面约75%，完整展示原有轮廓与形态；上缘保留少量干净背景供后续短标题排版。"
-        : "保留原有铺床状态和拍摄角度，商品为画面主体，背景简洁自然，不另造商品细节。");
-      const photographicDirection = p!.template === "vip"
-        ? vipDirection
-        : section === "texture" || section === "craft"
-          ? "保留参考近景的拍摄距离与细节位置，只校正曝光和杂乱背景，不平滑、重绘或改变面料纹理、绗缝和边缘。"
-          : "只整理光线与空间背景，让商品主体清楚完整。";
-      description =
-        "商品名称：" +
-        p!.info.name +
-        "。商品类目：" + category.name +
-        "。当前模块：" +
-        m.title +
-        "。风格：" +
-        (p!.template === "vip"
-          ? "自然家居电商摄影，以实物清楚、卖点可见为先"
-          : p!.template === "warm"
-          ? "温暖明亮家居"
-          : p!.template === "clean"
-            ? "简洁清晰实拍"
-            : "有层次的家纺画册") +
-        "。" + photographicDirection;
+      prompt = buildProductPrompt(p!, m, referenceAssets(p!, m).slice(0, images.length));
+      imageKind = m.kind;
       jobId =
         projectId + ":" + (p!.generationBatch || "legacy") + ":" + moduleId;
       const old = await db()
@@ -161,7 +133,7 @@ export async function POST(request: Request) {
         return Response.json({ asset: JSON.parse(old.result), reused: true });
       if (
         old?.status === "running" &&
-        Date.now() - new Date(old.updated_at).getTime() < 180000
+        Date.now() - new Date(old.updated_at).getTime() < IMAGE_JOB_LEASE_MS
       )
         return Response.json(
           { error: "这一张正在处理中，请稍后刷新查看。" },
@@ -180,16 +152,12 @@ export async function POST(request: Request) {
           "running",
           now,
           "running",
-          new Date(Date.now() - 180000).toISOString(),
+          new Date(Date.now() - IMAGE_JOB_LEASE_MS).toISOString(),
         )
         .run();
       if (!lock.meta.changes)
         return Response.json({ error: "任务已经在处理中。" }, { status: 409 });
     }
-    const prompt =
-      "你是一位家纺电商摄影修图师。" +
-      description +
-      " 严格保留参考照片中商品的颜色、花纹、格纹、绗缝、结构和真实比例，不增加不存在的配件，不编造材质或功能。不生成任何文字、商标、水印或价格。输出单张正方形商品摄影素材，供后续程序排版。";
     const usage = await db()
       .prepare(
         "SELECT COALESCE(SUM(bytes),0) AS total FROM assets WHERE owner_id = ?",
@@ -198,7 +166,7 @@ export async function POST(request: Request) {
       .first<{ total: number }>();
     if ((usage?.total || 0) > 290 * 1024 * 1024)
       throw new Error("试用素材空间已满，请先整理存储再生成。");
-    const output = await editProduct(uid, images, prompt);
+    const output = await editProduct(uid, images, prompt, { kind: imageKind });
     const size = imageDimensions(output.bytes, output.mime);
     const id = crypto.randomUUID();
     const key = uid + "/" + id;
