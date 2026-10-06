@@ -1,6 +1,20 @@
-# 本地版验证（Windows）
+# 织境验证记录
+
+## 门户服务器上线验收（2026-10-06）
+
+- 应用入口 `https://jxcymj.asia/zhijing/` 已上线；门户首页“内部管理”栏中，“报价开单（内部）”之后已添加“织境工作台”。浏览器点击入口进入织境登录页，使用新建服务器账号登录成功。
+- 运行版本为 `71914a1f2150d5942a9fa699024632ffd32bc8c9`。GitHub Actions [37430055105](https://github.com/YinMinJ/yiaijia-textile-studio/actions/runs/37430055105) 在 Ubuntu 22.04 / Node 24.19.0 上完成类型检查、129项测试、生产构建及源码目录和独立解包目录各15组隔离 HTTP 检查，发布任务成功。
+- 54,899,995字节的 Linux x64 成品包在本机和服务器的 SHA256 均为 `3a2575bfbc1047385a056f3a19a757eb39db514243b27209b3536ca615a1dcb6`。服务器直连 GitHub 下载较慢，改由现有 Workbench 上传同一已校验发布包；没有再次在服务器安装构建依赖或编译。
+- 用户明确授权强制重启并完成阿里云短信验证后，服务器恢复。Nginx 与原销售服务均为 active；门户首页200，销售入口401并返回原有 Basic 登录认证，未移除原认证。织境数据库 `PRAGMA quick_check` 为 ok；首次启动前 accounts=1、model_settings=1，projects/assets/sessions/generation_jobs均为0。未迁移本机作品、素材或会话。
+- `zhijing.service` 为 active/enabled，仅监听 `127.0.0.1:3010`，通过原站 HTTPS Nginx 提供 `/zhijing`。实际 cgroup 配置 MemoryHigh=402653184、MemoryMax=536870912、MemorySwapMax=0，检查时 MemoryCurrent约156MiB。Loopback 登录页200、匿名作品API401、圆体字体200；Nginx reload完成后再次检查公开路径健康端点，返回 `status=ok`。
+- 门户首页与 Nginx 已在修改前备份到服务器 `/root/site-backups/zhijing-portal-20261006-075145-29161e67`，配置语法检查及 reload成功。首页修改后 SHA256 为 `f666ff1645575fc0910f83b5f8ba1eb4418315409c9ca492df800cc6ff714b75`。
+- 浏览器实际核对“服务器工作空间”、我的作品0件、素材库0张，以及已保存的 B.AI URL、图片模型 `gpt-image-2`、文案模型 `deepseek-v4.1-flash`、high和2K。旧浏览器控制页签的点击状态异常，通过新页签重新验证导航正常，没有为此修改应用代码。
+- **仍未通过：服务器到 B.AI 的连接。** 设置读取和密钥解密成功，但模型列表请求失败；系统解析 `api.b.ai` 后连接超时，Cloudflare与Google公开DNS一致返回的两个服务商地址也在保留域名和TLS验证的探测中连接重置。未修改系统DNS、未固定IP、未关闭TLS验证，未调用付费生成。按[官方说明](https://docs.b.ai/zh-Hans/llmservice/app-and-service-availability/)，等待用户提供 App 内的正式大陆 API Base URL后继续配置与验收。
+- 本机截图：`data/proofs/zhijing-live-portal-footer.png`、`zhijing-live-workspace.png`、`zhijing-live-api-check.png`。账号登录资料只保存在忽略的 `data/deploy/织境服务器登录资料.txt`；凭据、截图和运行数据不提交仓库。
 
 ## 门户服务器部署准备与恢复（2026-10-06）
+
+以下为恢复前的阶段记录；实际部署结果及剩余 API 连通性问题见上方上线验收。
 
 - 目标为 `https://jxcymj.asia/zhijing/`；已准备门户底部“内部管理”栏的“织境工作台”入口预览，放在“报价开单（内部）”之后。预览仅修改该行，线上首页尚未修改。
 - Vue 请求、照片、字体、静态资源、登录跳转和会话 Cookie 均适配 `/zhijing` 子路径；存储中的原始照片地址保持兼容。修复子路径根目录的尾斜杠重定向循环。
@@ -8,7 +22,7 @@
 - `pnpm test`：124/124通过。服务器子路径和本地根路径分别完成生产构建，各通过15组隔离HTTP检查，涵盖认证、账户隔离、上传、保存、静态资源和退出；实际模型调用0次。
 - 浏览器已核对底部入口预览，并在恢复本地构建后刷新工作台，确认作品列表和 API 已配置状态正常。预览截图保存在本机 `data/proofs/zhijing-portal-entry-preview.jpg`。
 - 部署配置见 `deploy/` 和 `SERVER-DEPLOYMENT.md`。用户已确认登录授权，并选择不迁移作品、只配置现有自定义 API。已通过实例现有的阿里云 Workbench 免密连接进入服务器，建立独立系统用户与持久数据目录；管理员账号与 API 配置导入脚本均返回成功，服务器私密暂存输入已移除。
-- 服务器依赖安装期间出现 Ubuntu 内核 `kcompactd0` 持续阻塞；SSH 重连、云助手只读命令和门户 HTTPS 检查均未恢复。已保存 VNC 诊断截图，并请求用户批准实例重启。当前织境服务尚未启动，门户首页及 Nginx 尚未接入新入口，不能视为已上线。
+- 服务器依赖安装期间出现 Ubuntu 内核 `kcompactd0` 持续阻塞；SSH 重连、云助手只读命令和门户 HTTPS 检查均未恢复。已保存 VNC 诊断截图，并请求用户批准实例重启。该阶段织境服务尚未启动，门户首页及 Nginx 尚未接入新入口。
 - 发布方案改为 GitHub Actions 在 Ubuntu 22.04 构建 Linux x64 成品，服务器不再安装构建依赖或编译。织境运行单元新增独立内存上限与 OOM 退出处理；待服务器恢复后验证 cgroup v2 和实际服务限制。
 - 新增标准输入 API 配置导入 CLI，将源配置解密后按服务器新密钥和目标账号重新加密，只写入 `model_settings`。5项隔离检查验证新所有者解密、账户与数据数量、篡改拒绝和防止意外覆盖；完整测试129/129通过，不请求模型服务。本机导出的配置输入及源码包均存于忽略的 `data/deploy/`，源码包不包含 API 配置、作品或其他私密文件。
 

@@ -1,6 +1,6 @@
 # 织境服务器版
 
-目标入口为 `https://jxcymj.asia/zhijing/`，放在门户首页底部“内部管理”区域，链接名称为“织境工作台”。门户其他入口和页面使用现有站点服务；织境使用独立进程和持久数据目录。
+线上入口为 `https://jxcymj.asia/zhijing/`，已放在门户首页底部“内部管理”区域，链接名称为“织境工作台”。门户其他入口和页面使用现有站点服务；织境使用独立进程和持久数据目录。
 
 ## 构建与运行
 
@@ -8,9 +8,14 @@
 
 工作流或打包脚本的提交会自动触发构建；普通应用更新后，需在 GitHub Actions 中对 `master` 手动运行该工作流。构建发布包不会自动修改生产服务器。
 
-服务器需要 Node.js 24.11+ 和 pnpm。子路径与登录模式在构建时确定；服务器与本机根路径版本分别构建。
+发布包由 CI 使用 Node.js 24.19.0 和 pnpm 11.25.0 构建。运行服务器使用与该发布包匹配的 Linux x64 Node.js 24.19.0；安装成品发布包不需要 pnpm，也不执行依赖安装或生产编译。子路径与登录模式已写入发布包；服务器与本机根路径版本分别构建。
+
+2026-10-06 已安装运行的版本为 [`zhijing-server-71914a1f2150d5942a9fa699024632ffd32bc8c9`](https://github.com/YinMinJ/yiaijia-textile-studio/releases/tag/zhijing-server-71914a1f2150d5942a9fa699024632ffd32bc8c9)。下载其中的 `zhijing-linux-x64-71914a1f2150d5942a9fa699024632ffd32bc8c9.tar.gz` 后，先核对 SHA256 为 `3a2575bfbc1047385a056f3a19a757eb39db514243b27209b3536ca615a1dcb6`，再解包到独立版本目录。本次入口、登录和空作品库已通过线上验收；B.AI 从上海服务器的连接仍失败，详见 `VERIFICATION.md`。
+
+如需从源码重新构建，在 CI 或具备足够内存的独立 Linux x64 构建机上使用上述 Node.js 与 pnpm 版本。以下是外部构建步骤，不在共用的生产服务器上执行：
 
 ```sh
+pnpm install --frozen-lockfile
 APP_LOCAL_MODE=0 NEXT_PUBLIC_APP_LOCAL_MODE=0 NEXT_PUBLIC_APP_BASE_PATH=/zhijing pnpm build
 ```
 
@@ -36,6 +41,12 @@ DATA_DIR=/var/lib/zhijing node scripts/import-model-settings.mjs < /受保护目
 
 本机已有数据迁移须获得用户同意。SQLite、`uploads/` 与 `encryption-secret` 成组迁移；不要只复制数据库。原本机用户为 `local-user`，已保存 API 密文使用该 ID 作为校验数据，迁移登录身份时须保留该所有者 ID 或重新加密配置，不能只修改配置表的 `owner_id`。
 
-构建输出、运行数据、API 密钥和登录资料不上传 GitHub。服务器发布使用新目录，持久数据独立保留；上线前备份门户首页、Nginx 配置和原有织境数据（若存在），并记录修改前后文件指纹。更新失败可切回上一发布目录及还原门户/Nginx备份。
+构建输出不提交源码仓库；CI 仅将经过检查的运行文件发布到 GitHub Releases。运行数据、API 密钥和登录资料不上传 GitHub。服务器发布使用新目录，持久数据独立保留；上线前备份门户首页、Nginx 配置和原有织境数据（若存在），并记录修改前后文件指纹。更新失败可切回上一发布目录及还原门户/Nginx备份。
 
 验证包括匿名跳转登录、会话路径 `/zhijing`、Vue 脚本/CSS/字体/照片读取、作品保存回读、账户隔离、API 配置解密和退出失效。排版与 HTTP 验证不调用付费模型。
+
+## B.AI 连通性
+
+已为服务器独立账号导入现有加密 API 配置：`https://api.b.ai/v1`、`gpt-image-2`、`deepseek-v4.1-flash`、high、2K；未迁移本机作品或素材。2026-10-06 在上海服务器的模型列表检测失败，无鉴权 HTTPS 探测也出现连接超时或 TLS 连接重置，不能视为 AI 生成已可用。
+
+B.AI [官方服务可用性说明](https://docs.b.ai/zh-Hans/llmservice/app-and-service-availability/)要求从 Android App 的“B.AI 服务可用性”页面获取大陆可用的完整 API Base URL；公开文档不维护备用地址。取得正式备用地址后，以服务器账号重新保存对应连接并检测，不猜测接口域名、不关闭 TLS 校验，也不更改门户的网络配置。
