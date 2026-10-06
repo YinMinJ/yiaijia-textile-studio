@@ -1,0 +1,27 @@
+[Unit]
+Description=Zhijing fixed B.AI CONNECT adapter
+After=network.target bai-ssh-tunnel.service
+Wants=bai-ssh-tunnel.service
+
+[Service]
+Type=simple
+User=zhijing
+Group=zhijing
+ExecStart=/opt/zhijing/runtime/bin/node --max-old-space-size=32 /opt/zhijing/relay/bai-relay-connect.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_UNIX
+MemoryAccounting=true
+MemoryHigh=64M
+MemoryMax=96M
+MemorySwapMax=0
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target

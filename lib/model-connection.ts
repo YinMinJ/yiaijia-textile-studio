@@ -68,7 +68,7 @@ export function normalizeModelBase(value: string) {
 
 export function customAPIEndpoint(
   value: string,
-  resource: "models" | "images/edits" | "chat/completions",
+  resource: "models" | "images/edits" | "chat/completions" | "responses",
 ) {
   return (
     normalizeModelBase(value).replace(/\/images\/edits$/, "") +

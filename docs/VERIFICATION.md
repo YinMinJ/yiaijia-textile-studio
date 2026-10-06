@@ -1,5 +1,16 @@
 # 织境验证记录
 
+## B.AI 美国中继部署与链路恢复
+
+- 用户明确授权使用已授权的美国服务器 中继及创建受限 SSH 账号。美国端专用账号 `zhijing-relay` 仅允许指定的业务服务器 使用指定密钥访问，目标限定 `api.b.ai:443`；禁止远程转发、TTY、agent、X11、shell/subsystem 会话，`MaxSessions=0`。
+- 上海端独立用户 `zhijing-tunnel` 运行 `bai-ssh-tunnel.service`，只监听 `127.0.0.1:18443`；密钥和固定主机指纹保存在受保护的 `/etc/zhijing-relay/`，不提交仓库。`bai-relay-connect.service` 只监听 `127.0.0.1:13128`，仅转发固定目标的 HTTPS CONNECT，不解密 TLS，不开放公共代理。
+- 两项中继服务均为 active/enabled。织境通过 systemd 覆盖配置启用 Node 环境代理，重启后健康检查通过；应用发布 SHA 仍为 `71914a1f2150d5942a9fa699024632ffd32bc8c9`，已保存的 API URL 和模型配置保持不变。
+- 保留证书校验的无鉴权 HTTPS 探测经美国中继约 1.34 秒收到服务商 401；Node `NODE_USE_ENV_PROXY=1` 请求也收到 401。随后浏览器点击“检测连接”，带鉴权模型列表检测成功，`gpt-image-2` 与 `deepseek-v4.1-flash` 均找到。
+- 浏览器点击“生成 1 张测试图”，使用 high / 2K 设置实际生成并显示被子图片。页面图片元素 `complete=true`，`naturalWidth=2048`、`naturalHeight=2048`，确认本次图片接口、结果读取和浏览器显示通过。截图保存在本机 `data/proofs/bai-live-image-generated.png` 与 `data/proofs/bai-live-model-connection.png`，不提交仓库。
+- **文案仍待修复与复验。** 为4张非首图发起的文案请求已到达上游，但聊天补全路径在 `max_tokens=4096`、`reasoning_effort=low` 下返回 `finish_reason=length`，应用按不完整结果拒绝使用。计划改用 B.AI 支持的 Responses API 与 `reasoning.effort=none`；尚未据此宣称文案生成成功。
+- 完整测试139/139通过，其中 CONNECT 中继10项隔离测试覆盖回环监听、固定目标拒绝、普通 HTTP 拒绝、双向二进制传输、连接失败、断线与半关闭、连接上限及超时；这些自动化测试不请求模型服务，独立于上述线上真实调用。
+- 若图片接口返回其他域名的下载 URL，当前固定域名代理将拒绝该请求，需要另外核实访问路径。回退方法见 `SERVER-DEPLOYMENT.md`：停用应用代理覆盖配置后重启织境，再停用中继服务；业务数据和 API 配置无需迁移。
+
 ## 门户服务器上线验收（2026-10-06）
 
 - 应用入口 `https://jxcymj.asia/zhijing/` 已上线；门户首页“内部管理”栏中，“报价开单（内部）”之后已添加“织境工作台”。浏览器点击入口进入织境登录页，使用新建服务器账号登录成功。
@@ -9,12 +20,12 @@
 - `zhijing.service` 为 active/enabled，仅监听 `127.0.0.1:3010`，通过原站 HTTPS Nginx 提供 `/zhijing`。实际 cgroup 配置 MemoryHigh=402653184、MemoryMax=536870912、MemorySwapMax=0，检查时 MemoryCurrent约156MiB。Loopback 登录页200、匿名作品API401、圆体字体200；Nginx reload完成后再次检查公开路径健康端点，返回 `status=ok`。
 - 门户首页与 Nginx 已在修改前备份到服务器 `/root/site-backups/zhijing-portal-20261006-075145-29161e67`，配置语法检查及 reload成功。首页修改后 SHA256 为 `f666ff1645575fc0910f83b5f8ba1eb4418315409c9ca492df800cc6ff714b75`。
 - 浏览器实际核对“服务器工作空间”、我的作品0件、素材库0张，以及已保存的 B.AI URL、图片模型 `gpt-image-2`、文案模型 `deepseek-v4.1-flash`、high和2K。旧浏览器控制页签的点击状态异常，通过新页签重新验证导航正常，没有为此修改应用代码。
-- **仍未通过：服务器到 B.AI 的连接。** 设置读取和密钥解密成功，但模型列表请求失败；系统解析 `api.b.ai` 后连接超时，Cloudflare与Google公开DNS一致返回的两个服务商地址也在保留域名和TLS验证的探测中连接重置。未修改系统DNS、未固定IP、未关闭TLS验证，未调用付费生成。按[官方说明](https://docs.b.ai/zh-Hans/llmservice/app-and-service-availability/)，等待用户提供 App 内的正式大陆 API Base URL后继续配置与验收。
+- 首次上线时，上海服务器直连 B.AI 尚未通过：设置读取和密钥解密成功，但模型列表请求失败；系统解析 `api.b.ai` 后连接超时，Cloudflare与Google公开DNS一致返回的两个服务商地址也在保留域名和TLS验证的探测中连接重置。该阶段未修改系统DNS、未固定IP、未关闭TLS验证，未调用付费生成。后续已按用户授权部署美国中继并恢复 HTTPS 链路；当前鉴权与生成验收状态见上方中继记录。
 - 本机截图：`data/proofs/zhijing-live-portal-footer.png`、`zhijing-live-workspace.png`、`zhijing-live-api-check.png`。账号登录资料只保存在忽略的 `data/deploy/织境服务器登录资料.txt`；凭据、截图和运行数据不提交仓库。
 
 ## 门户服务器部署准备与恢复（2026-10-06）
 
-以下为恢复前的阶段记录；实际部署结果及剩余 API 连通性问题见上方上线验收。
+以下为恢复前的阶段记录；实际部署结果及后续 API 中继验收状态见上方记录。
 
 - 目标为 `https://jxcymj.asia/zhijing/`；已准备门户底部“内部管理”栏的“织境工作台”入口预览，放在“报价开单（内部）”之后。预览仅修改该行，线上首页尚未修改。
 - Vue 请求、照片、字体、静态资源、登录跳转和会话 Cookie 均适配 `/zhijing` 子路径；存储中的原始照片地址保持兼容。修复子路径根目录的尾斜杠重定向循环。

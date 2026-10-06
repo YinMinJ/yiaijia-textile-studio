@@ -147,10 +147,15 @@ export async function completeCopy(
   if (!settings?.textModel)
     throw new CopyAPIError("请先在“自定义 API”中填写并保存文案模型名称。");
   const key = await decryptSecret(settings.encryptedKey, uid);
+  // B.AI documents non-thinking mode for this model through Responses.
+  // Keep the bounded copy budget for visible text instead of internal reasoning.
+  // https://docs.b.ai/llmservice/models/deepseek-v4-1-flash/
+  const useResponses = new URL(settings.baseUrl).hostname === "api.b.ai" &&
+    settings.textModel.toLowerCase() === "deepseek-v4.1-flash";
   let response: Response;
   let raw: string;
   try {
-    response = await fetch(customAPIEndpoint(settings.baseUrl, "chat/completions"), {
+    response = await fetch(customAPIEndpoint(settings.baseUrl, useResponses ? "responses" : "chat/completions"), {
       method: "POST",
       redirect: "error",
       headers: {
@@ -160,12 +165,10 @@ export async function completeCopy(
       },
       body: JSON.stringify({
         model: settings.textModel,
-        messages,
         stream: false,
-        max_tokens: 4096,
-        ...(new URL(settings.baseUrl).hostname === "api.b.ai" && settings.textModel.toLowerCase() === "deepseek-v4.1-flash"
-          ? { reasoning_effort: "low" }
-          : {}),
+        ...(useResponses
+          ? { input: messages, max_output_tokens: 4096, reasoning: { effort: "none" } }
+          : { messages, max_tokens: 4096 }),
       }),
       signal: AbortSignal.timeout(60000),
     });
@@ -181,6 +184,11 @@ export async function completeCopy(
     throw new CopyAPIError(providerError(response.status, raw, key, response.headers.get("cf-ray") || "").message);
   let payload: {
     error?: unknown;
+    status?: unknown;
+    output?: Array<{
+      type?: unknown; role?: unknown; status?: unknown;
+      content?: Array<{ type?: unknown; text?: unknown }>;
+    }>;
     choices?: Array<{ finish_reason?: string; message?: { content?: unknown } }>;
   };
   try {
@@ -191,6 +199,30 @@ export async function completeCopy(
   if (!payload || typeof payload !== "object")
     throw new CopyAPIError("文案接口没有返回可用内容。");
   if (payload.error) throw new CopyAPIError(providerError(response.status, raw, key).message);
+  if (useResponses) {
+    if (payload.status !== "completed")
+      throw new CopyAPIError("模型返回的文案不完整，请重试或调整文案模型。");
+    if (!Array.isArray(payload.output))
+      throw new CopyAPIError("文案接口没有返回可用内容。");
+    const text: string[] = [];
+    for (const item of payload.output) {
+      // Reasoning and tool output must never be mistaken for finished copy.
+      if (item?.type !== "message" || item.role !== "assistant") continue;
+      if (item.status !== "completed" || !Array.isArray(item.content))
+        throw new CopyAPIError("模型返回的文案不完整，请重试或调整文案模型。");
+      for (const part of item.content) {
+        if (part?.type === "refusal")
+          throw new CopyAPIError("文案模型未能完成这次请求，请检查商品资料后重试。");
+        if (part?.type !== "output_text") continue;
+        if (typeof part.text !== "string")
+          throw new CopyAPIError("文案接口没有返回可用内容。");
+        text.push(part.text);
+      }
+    }
+    const content = text.join("").trim();
+    if (!content) throw new CopyAPIError("文案模型没有返回文字，请检查文案模型设置。");
+    return { content, model: settings.textModel };
+  }
   const choice = payload.choices?.[0];
   if (choice?.finish_reason === "length")
     throw new CopyAPIError("模型返回的文案不完整，请重试或调整文案模型。");

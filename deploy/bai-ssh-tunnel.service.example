@@ -1,0 +1,31 @@
+# Replace US_RELAY_HOST with the verified private deployment value first.
+# Install as /etc/systemd/system/bai-ssh-tunnel.service after provisioning
+# the dedicated account/key and pinning the US host key from its console.
+# Remote sshd must allow this account ONLY local forwarding to api.b.ai:443,
+# with no shell/subsystem sessions, remote forwarding, TTY, X11 or agent access.
+[Unit]
+Description=Zhijing fixed B.AI SSH tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zhijing-tunnel
+Group=zhijing-tunnel
+ExecStart=/usr/bin/ssh -N -T -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/zhijing-relay/known_hosts -o GlobalKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ForwardAgent=no -o ForwardX11=no -o RequestTTY=no -i /etc/zhijing-relay/client_ed25519 -L 127.0.0.1:18443:api.b.ai:443 zhijing-relay@US_RELAY_HOST
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryAccounting=true
+MemoryMax=64M
+MemorySwapMax=0
+TasksMax=16
+
+[Install]
+WantedBy=multi-user.target

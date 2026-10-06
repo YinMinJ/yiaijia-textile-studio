@@ -304,7 +304,7 @@ onBeforeUnmount(() => {
         <h2>连接前，准备这三项</h2>
         <ol>
           <li><span>01</span><div><strong>接口地址</strong><p>从服务商复制 API 地址。图片和文案使用同一个服务商及密钥。</p></div></li>
-          <li><span>02</span><div><strong>准确的模型 ID</strong><p>图片模型需要支持 /images/edits，文案模型需要支持 /chat/completions。</p></div></li>
+          <li><span>02</span><div><strong>准确的模型 ID</strong><p>图片模型需支持 /images/edits；文案通常使用 /chat/completions。B.AI 的 DeepSeek-V4.1-Flash 使用 /responses，以非思考模式生成短文案。</p></div></li>
           <li><span>03</span><div><strong>你的 API Key</strong><p>生成费用由对应服务商账户承担。页面只展示已保存密钥的末四位。</p></div></li>
         </ol>
         <div class="guide-note"><ShieldCheck :size="17" /><p>你的首图文案始终由你掌握。自动文案会保留首图标题和说明，其他图片也能逐张调整。</p></div>

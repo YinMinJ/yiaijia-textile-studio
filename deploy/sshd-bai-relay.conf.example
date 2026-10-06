@@ -1,0 +1,19 @@
+# US relay host: install in /etc/ssh/sshd_config.d/90-zhijing-relay.conf.
+# Provision a dedicated nologin account and a source-restricted authorized key
+# separately. Never commit a private key or reuse a general administration key.
+# Validate with sshd -t and sshd -T -C user=zhijing-relay,host=HOST,addr=SOURCE
+# before reloading ssh. These restrictions apply only to the relay account.
+Match User zhijing-relay
+    AuthenticationMethods publickey
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    AllowTcpForwarding local
+    AllowStreamLocalForwarding no
+    PermitOpen api.b.ai:443
+    PermitListen none
+    PermitTTY no
+    X11Forwarding no
+    AllowAgentForwarding no
+    MaxSessions 0
+    ForceCommand /usr/sbin/nologin
+Match all

@@ -10,7 +10,7 @@
 
 发布包由 CI 使用 Node.js 24.19.0 和 pnpm 11.25.0 构建。运行服务器使用与该发布包匹配的 Linux x64 Node.js 24.19.0；安装成品发布包不需要 pnpm，也不执行依赖安装或生产编译。子路径与登录模式已写入发布包；服务器与本机根路径版本分别构建。
 
-2026-10-06 已安装运行的版本为 [`zhijing-server-71914a1f2150d5942a9fa699024632ffd32bc8c9`](https://github.com/YinMinJ/yiaijia-textile-studio/releases/tag/zhijing-server-71914a1f2150d5942a9fa699024632ffd32bc8c9)。下载其中的 `zhijing-linux-x64-71914a1f2150d5942a9fa699024632ffd32bc8c9.tar.gz` 后，先核对 SHA256 为 `3a2575bfbc1047385a056f3a19a757eb39db514243b27209b3536ca615a1dcb6`，再解包到独立版本目录。本次入口、登录和空作品库已通过线上验收；B.AI 从上海服务器的连接仍失败，详见 `VERIFICATION.md`。
+2026-10-06 已安装运行的版本为 [`zhijing-server-71914a1f2150d5942a9fa699024632ffd32bc8c9`](https://github.com/YinMinJ/yiaijia-textile-studio/releases/tag/zhijing-server-71914a1f2150d5942a9fa699024632ffd32bc8c9)。下载其中的 `zhijing-linux-x64-71914a1f2150d5942a9fa699024632ffd32bc8c9.tar.gz` 后，先核对 SHA256 为 `3a2575bfbc1047385a056f3a19a757eb39db514243b27209b3536ca615a1dcb6`，再解包到独立版本目录。本次入口、登录和空作品库已通过线上验收；B.AI 通过用户授权的美国中继完成带鉴权模型列表检测，并实际生成和显示一张 2048 × 2048 图片。文案生成仍待修复与复验，详见 `VERIFICATION.md`。
 
 如需从源码重新构建，在 CI 或具备足够内存的独立 Linux x64 构建机上使用上述 Node.js 与 pnpm 版本。以下是外部构建步骤，不在共用的生产服务器上执行：
 
@@ -47,6 +47,25 @@ DATA_DIR=/var/lib/zhijing node scripts/import-model-settings.mjs < /受保护目
 
 ## B.AI 连通性
 
-已为服务器独立账号导入现有加密 API 配置：`https://api.b.ai/v1`、`gpt-image-2`、`deepseek-v4.1-flash`、high、2K；未迁移本机作品或素材。2026-10-06 在上海服务器的模型列表检测失败，无鉴权 HTTPS 探测也出现连接超时或 TLS 连接重置，不能视为 AI 生成已可用。
+已为服务器独立账号导入现有加密 API 配置：`https://api.b.ai/v1`、`gpt-image-2`、`deepseek-v4.1-flash`、high、2K；未迁移本机作品或素材。最初上海服务器直连出现超时或 TLS 连接重置。用户随后明确授权使用已授权的美国服务器 中继，并创建专用受限 SSH 账号；应用发布版本与 API Base URL 保持不变。
 
-B.AI [官方服务可用性说明](https://docs.b.ai/zh-Hans/llmservice/app-and-service-availability/)要求从 Android App 的“B.AI 服务可用性”页面获取大陆可用的完整 API Base URL；公开文档不维护备用地址。取得正式备用地址后，以服务器账号重新保存对应连接并检测，不猜测接口域名、不关闭 TLS 校验，也不更改门户的网络配置。
+上海服务器使用专用系统用户 `zhijing-tunnel` 运行 `bai-ssh-tunnel.service`，将 `127.0.0.1:18443` 经 SSH 转发到 `api.b.ai:443`。美国端账号 `zhijing-relay` 仅接受业务服务器固定出口 IP 的专用密钥，`PermitOpen` 限制为 `api.b.ai:443`，禁止远程转发、TTY、agent、X11 和 shell/subsystem 会话，`MaxSessions=0`。客户端密钥位于 `/etc/zhijing-relay/client_ed25519`；`known_hosts` 固定从美国服务器控制台核对的主机密钥，并启用严格主机密钥检查。私钥、服务器账号凭据和 API 密钥不进入 GitHub。
+
+上海 `bai-relay-connect.service` 以 `zhijing` 用户运行 `/opt/zhijing/relay/bai-relay-connect.mjs`，仅监听 `127.0.0.1:13128`，只接受目标严格等于 `api.b.ai:443` 的 HTTPS CONNECT，并转交本地 SSH 转发端口。该进程不终止 TLS；证书验证和 API 鉴权仍由应用完成。普通 HTTP 及其他 CONNECT 目标均被拒绝，不开放公共代理端口。
+
+应用通过 `/etc/systemd/system/zhijing.service.d/bai-relay.conf` 在 Node 启动前设置 `NODE_USE_ENV_PROXY=1` 和 `HTTPS_PROXY=http://127.0.0.1:13128`（包含小写变量），并将本机地址排除在代理之外。模板见 `deploy/bai-ssh-tunnel.service.example`、`deploy/bai-relay-connect.service` 与 `deploy/zhijing-bai-relay.conf.example`。两项中继服务已启用开机启动并处于 active；织境重启后健康检查通过。保留 TLS 校验的无鉴权请求经中继约 1.34 秒返回服务商 401，Node 环境代理请求也返回 401。随后浏览器带鉴权模型列表检测成功，找到 `gpt-image-2` 和 `deepseek-v4.1-flash`；高质量、2K 设置下实际生成的一张测试图已完整显示为 2048 × 2048。文案请求已到达上游，但当前聊天补全路径返回 `finish_reason=length`，被应用拒绝作为不完整结果使用，仍需修复和复验。
+
+恢复时先检查 `systemctl status bai-ssh-tunnel bai-relay-connect zhijing` 与对应日志，再核对两个中继监听端口仅绑定回环地址。SSH 断线会自动重连；两项中继服务也可手动重启，再检查织境健康状态。不要在日志或排障命令输出中打印私钥或 API Key。
+
+需要回退中继时，先确认下列 `.disabled` 备份名尚不存在，再将应用代理覆盖配置改名并重载、重启应用，最后停用中继服务：
+
+```sh
+mv /etc/systemd/system/zhijing.service.d/bai-relay.conf /etc/systemd/system/zhijing.service.d/bai-relay.conf.disabled
+systemctl daemon-reload
+systemctl restart zhijing
+systemctl disable --now bai-relay-connect.service bai-ssh-tunnel.service
+```
+
+这会恢复织境原来的直接出站方式，门户入口、业务数据和已保存 API 配置不变；原上海直连故障可能再次出现。重新启用时恢复 `.conf` 文件，启用并启动两项中继服务，执行 `daemon-reload` 后重启织境。
+
+中继只允许 `api.b.ai:443`。若服务商返回另一域名的图片下载 URL，或未来改用其他 API 服务商，该请求会被当前代理拒绝，需要先单独核实并配置对应访问路径；不能据模型列表可达就假定图片下载成功。B.AI [官方服务可用性说明](https://docs.b.ai/zh-Hans/llmservice/app-and-service-availability/)提供从 App 获取正式大陆 API Base URL 的另一途径；若改用该地址，应同步调整或停用当前固定域名代理，并重新验收，不猜测接口域名或关闭 TLS 校验。

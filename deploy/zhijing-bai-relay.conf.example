@@ -1,0 +1,15 @@
+# Install as /etc/systemd/system/zhijing.service.d/bai-relay.conf.
+# Proxy values must exist before Node starts, not be loaded later by the launcher.
+# Keep the application's 256 MiB heap limit and its existing memory cgroup limits.
+# This relay permits ONLY api.b.ai:443. Other providers or returned image URLs
+# on other hosts need a separately reviewed route before they can be used.
+[Unit]
+Wants=bai-relay-connect.service
+After=bai-relay-connect.service
+
+[Service]
+Environment=NODE_USE_ENV_PROXY=1
+Environment=HTTPS_PROXY=http://127.0.0.1:13128
+Environment=https_proxy=http://127.0.0.1:13128
+Environment=NO_PROXY=localhost,127.0.0.1,::1
+Environment=no_proxy=localhost,127.0.0.1,::1
