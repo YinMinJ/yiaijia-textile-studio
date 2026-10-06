@@ -26,7 +26,7 @@ let fontReady: Promise<unknown> | null = null;
 function font() {
   if (!fontReady) {
     fontReady = Promise.all([400, 500, 700].map((weight) =>
-      document.fonts.load(`${weight} 16px TextileSans`, "宜爱家 Aa 0123 ×"),
+      document.fonts.load(`${weight} 16px TextileSans`, "织境 家纺 Aa 0123 ×"),
     )).catch(() => {
       fontReady = null;
       throw new Error("文案字体暂时无法加载，请刷新页面后重试。");
@@ -250,15 +250,7 @@ async function drawReference(
     if (subtitleHeight) copy(subtitle, headlineX, end + (titleHeight ? gap : 0), headlineWidth,
       subtitleHeight, subtitleSize, { min: w * 0.021, leading: 1.25, align, color: ink });
   };
-  const brand = (onPhoto: boolean) => {
-    const label = p.info.brand.trim();
-    if (!label) return;
-    const box = { x: pad, y: pad * 0.5, width: w * 0.2, height: w * 0.033 };
-    copy(label, box.x, box.y, box.width, box.height, w * 0.021,
-      { min: w * 0.017, weight: 700, color: photoInk(ctx, appearance, box, onPhoto), leading: 1.15 });
-  };
   if (section === "specs") {
-    brand(false);
     heading(false);
     const bedding = categoryFor(p).id === "bedding-set";
     const rows = [
@@ -345,7 +337,6 @@ async function drawReference(
       photoLabel(labels[0], pad, firstHeight - pad - w * 0.028, inner);
       photoLabel(labels[1], pad, bottom ? secondY + pad * 1.6 : h - pad - w * 0.028, inner);
     }
-    brand(true);
     heading(true);
     return;
   }
@@ -357,7 +348,6 @@ async function drawReference(
     // transparent type stays over the product at the chosen corner.
     photo(secondWidth + gap, 0, w - secondWidth - gap, h);
     photoFrame(second, 0, 0, secondWidth, h);
-    brand(true);
     heading(true);
     return;
   }
@@ -370,7 +360,6 @@ async function drawReference(
     const y = bottom ? pad * 2 : h - pad - width;
     photoFrame(second, x, y, width, width, w * 0.018);
   }
-  brand(true);
   heading(true);
   if (["colors", "components"].includes(section)) {
     const label = labelFor(primary.id, m.sourceImageId);

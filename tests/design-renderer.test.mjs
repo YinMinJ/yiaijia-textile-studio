@@ -93,7 +93,7 @@ async function renderModule({
 
 const right = rect => rect.x + rect.width, bottom = rect => rect.y + rect.height;
 const close = (actual, expected, message) => assert.ok(Math.abs(actual - expected) < 0.01, `${message}: ${actual} vs ${expected}`);
-const copyTexts = result => result.canvas.texts.filter(text => text.value !== result.project.info.brand);
+const copyTexts = result => result.canvas.texts;
 function assertInsideCanvas(canvas) {
   for (const [kind, elements] of [["photo", canvas.images], ["text", canvas.texts]]) for (const element of elements) {
     for (const key of ["x", "y", "width", "height"]) assert.ok(Number.isFinite(element[key]), `${kind} ${key} is finite`);
@@ -165,14 +165,24 @@ test("automatic contrast reads the actual photo and gracefully falls back when p
   }
 });
 
-test("every old and current template removes copy backing at both export sizes", async () => {
+test("every old and current template removes copy backing and brand overlays at both export sizes", async () => {
   for (const template of ["vip", "warm", "clean", "editorial"]) for (const kind of ["main", "detail"])
     for (const composition of [undefined, "auto", "immersive", "split", "minimal"])
       for (const section of ["hero", "scene", "texture", "pattern", "craft", "filling", "components", "benefits", "colors", "care", "specs"]) {
-        const { canvas } = await renderModule({ template, kind, section, composition,
+        const { canvas, project } = await renderModule({ template, kind, section, composition,
           second: !["hero", "scene", "benefits", "care", "specs"].includes(section),
+          info: { brand: "品牌回归校验" },
           title: "柔软织物\n近看真实质感", subtitle: "商品实拍展示 · 花型与配色请核对所选规格" });
-        try { assertInsideCanvas(canvas); assertNoCopyBacking(canvas); }
+        try {
+          assertInsideCanvas(canvas); assertNoCopyBacking(canvas);
+          const brandText = canvas.texts.filter(text => text.value === project.info.brand);
+          if (section === "specs") {
+            assert.equal(brandText.length, 1, "product specs keep the supplied brand only in its factual row");
+            assert.equal(brandText[0].weight, 400, "the brand remains a parameter value rather than a branded heading");
+            assert.ok(brandText[0].y > 120, "no brand name is painted in the top-left corner");
+            assert.ok(canvas.texts.some(text => text.value === "品牌"), "the actual brand row label is preserved");
+          } else assert.equal(brandText.length, 0, "main and detail photos have no program-added brand name");
+        }
         catch (error) { throw new Error(`${template}/${kind}/${section}/${composition || "legacy"}: ${error.message}`); }
         if (section !== "specs") {
           const area = canvas.images.reduce((sum, image) => sum + image.width * image.height, 0);
@@ -194,8 +204,18 @@ test("legacy sectionless modules retain the shared moduleSection mapping and man
     close(legacy.canvas.height - bottom(legacy.canvas.images[1]), current.canvas.height - bottom(current.canvas.images[1]),
       "the inset retains its natural bottom margin at the legacy export height");
     assert.deepEqual(legacy.canvas.texts, current.canvas.texts);
+    assert.ok(legacy.canvas.texts.every(text => text.value !== legacy.project.info.brand),
+      "saved legacy modules also omit the old top-left brand overlay");
     assertNoCopyBacking(legacy.canvas);
   }
+});
+
+test("removing the corner brand does not erase an explicitly authored brand headline", async () => {
+  const result = await renderModule({ section: "hero", kind: "main", title: "作者手写品牌", subtitle: "",
+    info: { brand: "作者手写品牌" } });
+  assert.deepEqual(result.canvas.texts.map(text => text.value), ["作者手写品牌"]);
+  close(result.canvas.texts[0].y, 1200 * 0.067, "the saved headline retains its selected heading location");
+  assert.equal(result.canvas.texts[0].weight, 700);
 });
 
 test("evidence never manufactures a second photo and compositions remain visibly distinct", async () => {
@@ -283,16 +303,16 @@ test("enlargement keeps source bounds and does not enlarge secondary evidence", 
 test("Chinese wrapping preserves manual line breaks and balances automatic one-character tails", async () => {
   const title = "喜欢它，从这些细节开始";
   const automatic = await renderModule({ section: "benefits", title });
-  const titleLines = automatic.canvas.texts.filter(line => line.weight === 700 && line.value !== automatic.project.info.brand).map(line => line.value);
+  const titleLines = automatic.canvas.texts.filter(line => line.weight === 700).map(line => line.value);
   assert.equal(titleLines.join(""), title);
   assert.ok(titleLines.every(line => [...line].length > 1));
   const explicitTitle = "喜欢它，从这些细节开\n始";
   const explicit = await renderModule({ section: "benefits", title: explicitTitle });
-  const explicitLines = explicit.canvas.texts.filter(line => line.weight === 700 && line.value !== explicit.project.info.brand).map(line => line.value);
+  const explicitLines = explicit.canvas.texts.filter(line => line.weight === 700).map(line => line.value);
   assert.equal(explicitLines.at(-1), "始");
   assert.equal(explicitLines.join(""), explicitTitle.replace("\n", ""));
   const quoted = await renderModule({ section: "benefits", title: "轻柔软「开始" });
-  const quoteLines = quoted.canvas.texts.filter(line => line.weight === 700 && line.value !== quoted.project.info.brand).map(line => line.value);
+  const quoteLines = quoted.canvas.texts.filter(line => line.weight === 700).map(line => line.value);
   assert.ok(quoteLines.every(line => !line.endsWith("「")));
   assert.equal(quoteLines.join(""), "轻柔软「开始");
   for (const result of [automatic, explicit, quoted]) assertInsideCanvas(result.canvas);

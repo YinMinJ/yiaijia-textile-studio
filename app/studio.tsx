@@ -176,7 +176,6 @@ function TemplateCard({
         className={"template-art " + id}
         style={{ background: t.bg, color: t.ink }}
       >
-        <span className="template-brand">{id === "vip" ? "宜爱家" : "YIAIJIA / HOME"}</span>
         <strong>
           {id === "vip" ? "格纹肌理" : id === "editorial"
             ? "在细节里，\n发现质感。"
@@ -1093,13 +1092,13 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
           <button
             className="brand"
             onClick={() => navigate("home")}
-            aria-label="宜爱家工作台首页"
+            aria-label="织境工作台首页"
           >
             <span className="brand-mark">
               <Layers size={24} />
             </span>
             <span>
-              <b>宜爱家</b>
+              <b>织境</b>
               <small>家纺设计工作台</small>
             </span>
           </button>
@@ -1146,9 +1145,9 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
             使用帮助
           </button>
           <div className="profile">
-            <div className="avatar">宜</div>
+            <div className="avatar">织</div>
             <div>
-              <b>宜爱家工作台</b>
+              <b>织境工作台</b>
               <small>商品设计 · 本地创作</small>
             </div>
           </div>
@@ -1177,7 +1176,7 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
             >
               <HelpCircle size={19} />
             </button>
-            <span className="top-avatar">宜</span>
+            <span className="top-avatar">织</span>
           </div>
         </header>
         {busy && (

@@ -121,6 +121,7 @@ globalThis.fetch = async () => {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.ok(html.includes("登录工作台"));
+  assert.match(html, /<title>登录 · 织境<\/title>/);
   const css = html.match(/href="([^"\s]*\/_next\/static\/[^"\s]*\.css[^"\s]*)"/);
   assert.ok(css, "login page must include a stylesheet");
   assert.equal((await request(css[1])).status, 200);
@@ -138,6 +139,7 @@ globalThis.fetch = async () => {
   assert.match(response.headers.get("content-type"), /text\/html/i);
   assert.equal(response.headers.get("cache-control"), "no-store");
   const workbenchHtml = await response.text();
+  assert.match(workbenchHtml, /<title>织境 · 家纺设计工作台<\/title>/);
   assert.match(workbenchHtml, /<div\s+id=["']app["']/);
   const vueModule = workbenchHtml.match(/<script\b(?=[^>]*\btype=["']module["'])[^>]*\bsrc=["'](\/workbench\/assets\/[^"']+\.js)["']/i);
   const vueStylesheet = workbenchHtml.match(/\bhref=["'](\/workbench\/assets\/[^"']+\.css)["']/i);

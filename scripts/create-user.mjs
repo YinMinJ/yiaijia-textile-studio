@@ -6,7 +6,7 @@ import { createAccount, createInitialAccount, ensureBootstrapAdmin, hasAccounts,
 const MAX_INPUT_BYTES = 8192;
 
 function help() {
-  process.stdout.write(`创建宜爱家工作台账户\n\n用法：\n  node --env-file-if-exists=.env scripts/create-user.mjs [--if-empty]\n\n交互模式询问邮箱、显示名称和密码；密码输入不回显。\n自动化模式通过标准输入传入 JSON 对象，字段为 email、password、displayName（可选）。\n--if-empty：已有账户直接退出；空库先使用明确配置的初始管理员，否则提示创建。\n不要把密码作为命令行参数；密码须为 12–256 个字符。\n`);
+  process.stdout.write(`创建织境工作台账户\n\n用法：\n  node --env-file-if-exists=.env scripts/create-user.mjs [--if-empty]\n\n交互模式询问邮箱、显示名称和密码；密码输入不回显。\n自动化模式通过标准输入传入 JSON 对象，字段为 email、password、displayName（可选）。\n--if-empty：已有账户直接退出；空库先使用明确配置的初始管理员，否则提示创建。\n不要把密码作为命令行参数；密码须为 12–256 个字符。\n`);
 }
 
 async function readJsonInput() {

@@ -79,7 +79,7 @@ export default function StudioHome({
     <main className="page studio-home">
       <header className="sh-heading">
         <div>
-          <p className="sh-eyebrow">宜爱家 · 商品视觉工作台</p>
+          <p className="sh-eyebrow">织境 · 商品视觉工作台</p>
           <h1>今天，上新什么好物？</h1>
         </div>
         <span className="sh-local"><span /> 本地工作空间</span>

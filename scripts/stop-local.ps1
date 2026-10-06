@@ -6,6 +6,6 @@ $record = Get-Content -LiteralPath $pidPath -Raw | ConvertFrom-Json
 $appProcess = Get-Process -Id ([int]$record.processId) -ErrorAction SilentlyContinue
 if ($appProcess -and $appProcess.ProcessName -eq 'node' -and $appProcess.Path -eq $record.nodePath -and $appProcess.StartTime.ToUniversalTime().Ticks -eq ([datetime]$record.startedAt).ToUniversalTime().Ticks) {
   Stop-Process -Id $appProcess.Id
-  Write-Host 'Yiaijia stopped. Saved works remain in data.'
+  Write-Host 'Zhijing stopped. Saved works remain in data.'
 } elseif ($appProcess) { throw 'Process identity changed; no process was stopped.' }
 Remove-Item -LiteralPath $pidPath -Force

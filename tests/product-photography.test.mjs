@@ -56,7 +56,7 @@ test("photography follows transparent corner typography for every template, imag
         assert.match(plan.framing, /不加渐变遮罩/);
         assert.match(plan.framing, /所有摄影版式都保持文字区域下方有真实照片/);
         assert.match(plan.framing, /不额外添加白色、奶油色留白条或照片外文案区/);
-        assert.doesNotMatch(plan.framing, /照片之外的|画布留白内|左下方小卡|独立底栏中|窄栏.*展开|信息卡/);
+        assert.doesNotMatch(plan.framing, /照片之外的|画布留白内|左下方小卡|独立底栏中|窄栏.*展开|信息卡|品牌空间/);
       }
     }
   }

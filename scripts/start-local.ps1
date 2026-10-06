@@ -32,5 +32,5 @@ if (-not (Test-App)) {
   }
   if (-not $ready) { throw "Startup failed. See $dataPath\server-error.log" }
 }
-Write-Host "Yiaijia is running at $appUrl"
+Write-Host "Zhijing is running at $appUrl"
 if (-not $NoBrowser) { Start-Process $appUrl }
