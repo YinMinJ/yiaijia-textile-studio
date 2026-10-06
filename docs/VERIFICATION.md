@@ -1,20 +1,28 @@
 # 织境验证记录
 
+## 当前服务器升级与文案复验
+
+- 生产已切换到 `0779e99576b776623669c812dd714f39bf3d09d0`，对应 GitHub Actions [37437197486](https://github.com/YinMinJ/yiaijia-textile-studio/actions/runs/37437197486)。安装发布包 SHA256 为 `b31bcd57b913b12fb702d0a10cb95849ed1ad164d86d28e7cfbcfe521dce397d`；CI 完成144项测试、Vue/Next类型检查、生产构建及两组隔离HTTP验收；未在生产服务器安装构建依赖或编译。
+- 数据库只读复核：`PRAGMA quick_check=ok`，accounts=1、projects=0、assets=1、model_settings=1。新增的一张素材来自本次线上生图验收，并非迁移本机作品；加密主密钥与升级前逐字节比较一致。
+- 模型列表、2048 × 2048 实际生图及美国中继链路已在此前阶段通过下方记录的验收。SSH 断线自动重连测试恢复 active，`NRestarts=1`；其他域名的 HTTPS CONNECT 被拒绝为403。3010、13128、18443三个服务端口均只监听回环地址。
+- **文案复验通过。** 当前版本改用 Responses 接口。一次页面调用在60秒超时，原因未确定；随后最小直接探测在约2.947秒返回 HTTP 200，输出5 tokens、推理0 tokens。确认探测正常后手动重试页面请求，界面显示“已由 deepseek-v4.1-flash 生成4张图的文案。首图保留原文”；没有自动重试。
+- 首图标题“立体格纹绗缝被”和说明“格纹肌理·弧线绗缝”保持不变；其余4张标题分别更新为“铺一床温柔的卧室”“绗缝留下的饱满感”“看得见的弧线走线”“米白，还是灰紫”。本次文案结果与此前2048 × 2048实际生图、带鉴权模型列表共同完成线上模型调用验收。文案成功截图保存在本机 `data/proofs/bai-live-copy-generated.png`，未保存测试作品或提交截图。
+
 ## B.AI 美国中继部署与链路恢复
 
-- 用户明确授权使用已授权的美国服务器 中继及创建受限 SSH 账号。美国端专用账号 `zhijing-relay` 仅允许指定的业务服务器 使用指定密钥访问，目标限定 `api.b.ai:443`；禁止远程转发、TTY、agent、X11、shell/subsystem 会话，`MaxSessions=0`。
-- 上海端独立用户 `zhijing-tunnel` 运行 `bai-ssh-tunnel.service`，只监听 `127.0.0.1:18443`；密钥和固定主机指纹保存在受保护的 `/etc/zhijing-relay/`，不提交仓库。`bai-relay-connect.service` 只监听 `127.0.0.1:13128`，仅转发固定目标的 HTTPS CONNECT，不解密 TLS，不开放公共代理。
-- 两项中继服务均为 active/enabled。织境通过 systemd 覆盖配置启用 Node 环境代理，重启后健康检查通过；应用发布 SHA 仍为 `71914a1f2150d5942a9fa699024632ffd32bc8c9`，已保存的 API URL 和模型配置保持不变。
+- 用户明确授权使用美国服务器中继及创建受限 SSH 账号。美国端专用账号仅允许指定的业务服务器使用指定密钥访问，目标限定 `api.b.ai:443`；禁止远程转发、TTY、agent、X11、shell/subsystem 会话，`MaxSessions=0`。真实服务器 IP、登录凭据、主机密钥与指纹、私钥及 API 密钥不写入公开文档或仓库。
+- 上海端独立用户运行 `bai-ssh-tunnel.service`，只监听 `127.0.0.1:18443`；密钥和固定主机指纹保存在受保护的 `/etc/zhijing-relay/`，不提交仓库。`bai-relay-connect.service` 只监听 `127.0.0.1:13128`，仅转发固定目标的 HTTPS CONNECT，不解密 TLS，不开放公共代理。
+- 两项中继服务均为 active/enabled。织境通过 systemd 覆盖配置启用 Node 环境代理，重启后健康检查通过；本阶段应用发布 SHA 为 `71914a1f2150d5942a9fa699024632ffd32bc8c9`，已保存的 API URL 和模型配置保持不变。后续版本见上方升级记录。
 - 保留证书校验的无鉴权 HTTPS 探测经美国中继约 1.34 秒收到服务商 401；Node `NODE_USE_ENV_PROXY=1` 请求也收到 401。随后浏览器点击“检测连接”，带鉴权模型列表检测成功，`gpt-image-2` 与 `deepseek-v4.1-flash` 均找到。
 - 浏览器点击“生成 1 张测试图”，使用 high / 2K 设置实际生成并显示被子图片。页面图片元素 `complete=true`，`naturalWidth=2048`、`naturalHeight=2048`，确认本次图片接口、结果读取和浏览器显示通过。截图保存在本机 `data/proofs/bai-live-image-generated.png` 与 `data/proofs/bai-live-model-connection.png`，不提交仓库。
-- **文案仍待修复与复验。** 为4张非首图发起的文案请求已到达上游，但聊天补全路径在 `max_tokens=4096`、`reasoning_effort=low` 下返回 `finish_reason=length`，应用按不完整结果拒绝使用。计划改用 B.AI 支持的 Responses API 与 `reasoning.effort=none`；尚未据此宣称文案生成成功。
-- 完整测试139/139通过，其中 CONNECT 中继10项隔离测试覆盖回环监听、固定目标拒绝、普通 HTTP 拒绝、双向二进制传输、连接失败、断线与半关闭、连接上限及超时；这些自动化测试不请求模型服务，独立于上述线上真实调用。
+- 本阶段为4张非首图发起的文案请求已到达上游，但聊天补全路径在 `max_tokens=4096`、`reasoning_effort=low` 下返回 `finish_reason=length`，应用按不完整结果拒绝使用。后续已切换 Responses API 并完成浏览器文案复验，见上方升级记录。
+- 本阶段完整测试139/139通过，其中 CONNECT 中继10项隔离测试覆盖回环监听、固定目标拒绝、普通 HTTP 拒绝、双向二进制传输、连接失败、断线与半关闭、连接上限及超时；这些自动化测试不请求模型服务，独立于上述线上真实调用。
 - 若图片接口返回其他域名的下载 URL，当前固定域名代理将拒绝该请求，需要另外核实访问路径。回退方法见 `SERVER-DEPLOYMENT.md`：停用应用代理覆盖配置后重启织境，再停用中继服务；业务数据和 API 配置无需迁移。
 
 ## 门户服务器上线验收（2026-10-06）
 
 - 应用入口 `https://jxcymj.asia/zhijing/` 已上线；门户首页“内部管理”栏中，“报价开单（内部）”之后已添加“织境工作台”。浏览器点击入口进入织境登录页，使用新建服务器账号登录成功。
-- 运行版本为 `71914a1f2150d5942a9fa699024632ffd32bc8c9`。GitHub Actions [37430055105](https://github.com/YinMinJ/yiaijia-textile-studio/actions/runs/37430055105) 在 Ubuntu 22.04 / Node 24.19.0 上完成类型检查、129项测试、生产构建及源码目录和独立解包目录各15组隔离 HTTP 检查，发布任务成功。
+- 首次上线版本为 `71914a1f2150d5942a9fa699024632ffd32bc8c9`。GitHub Actions [37430055105](https://github.com/YinMinJ/yiaijia-textile-studio/actions/runs/37430055105) 在 Ubuntu 22.04 / Node 24.19.0 上完成类型检查、129项测试、生产构建及源码目录和独立解包目录各15组隔离 HTTP 检查，发布任务成功。
 - 54,899,995字节的 Linux x64 成品包在本机和服务器的 SHA256 均为 `3a2575bfbc1047385a056f3a19a757eb39db514243b27209b3536ca615a1dcb6`。服务器直连 GitHub 下载较慢，改由现有 Workbench 上传同一已校验发布包；没有再次在服务器安装构建依赖或编译。
 - 用户明确授权强制重启并完成阿里云短信验证后，服务器恢复。Nginx 与原销售服务均为 active；门户首页200，销售入口401并返回原有 Basic 登录认证，未移除原认证。织境数据库 `PRAGMA quick_check` 为 ok；首次启动前 accounts=1、model_settings=1，projects/assets/sessions/generation_jobs均为0。未迁移本机作品、素材或会话。
 - `zhijing.service` 为 active/enabled，仅监听 `127.0.0.1:3010`，通过原站 HTTPS Nginx 提供 `/zhijing`。实际 cgroup 配置 MemoryHigh=402653184、MemoryMax=536870912、MemorySwapMax=0，检查时 MemoryCurrent约156MiB。Loopback 登录页200、匿名作品API401、圆体字体200；Nginx reload完成后再次检查公开路径健康端点，返回 `status=ok`。
