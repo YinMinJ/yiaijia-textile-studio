@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import ts from "typescript";
 import * as connection from "../lib/model-connection.ts";
+import { COPY_GENERATION_TIMEOUT_MS, COPY_CLIENT_TIMEOUT_MS } from "../lib/copy-request.ts";
+import { copyClock } from "./helpers/copy-clock.mjs";
 
 const state = {
   settings: null,
@@ -10,16 +12,18 @@ const state = {
   connection,
   requests: [],
   timeouts: [],
+  clock: copyClock(),
   respond: () => { throw new Error("No test response configured"); },
 };
 globalThis.__copyTransportTest = state;
 const source = (await readFile(new URL("../lib/model-api.ts", import.meta.url), "utf8"))
   .replace('import { getEncryptionSecret } from "./server-secrets";', 'const getEncryptionSecret = () => globalThis.__copyTransportTest.secret;')
   .replace('import { db } from "./server-store";', 'const db = () => ({prepare: () => ({bind: () => ({first: async () => globalThis.__copyTransportTest.settings})})});')
+  .replace('from "./copy-request"', `from ${JSON.stringify(new URL("../lib/copy-request.ts", import.meta.url).href)}`)
   .replace(/import \{\s+publicHttps,[\s\S]*?\} from "\.\/model-connection";/, 'const {publicHttps, normalizeModelBase, providerError, inspectModelList, customAPIEndpoint} = globalThis.__copyTransportTest.connection;')
   .replace('export { publicHttps, normalizeModelBase } from "./model-connection";', '')
   + '\nconst fetch = async (...args) => { globalThis.__copyTransportTest.requests.push(args); return globalThis.__copyTransportTest.respond(...args); };'
-  + '\nconst AbortSignal = {timeout: milliseconds => {globalThis.__copyTransportTest.timeouts.push(milliseconds); return globalThis.AbortSignal.timeout(milliseconds);}};';
+  + '\nconst AbortSignal = {timeout: milliseconds => {globalThis.__copyTransportTest.timeouts.push(milliseconds); return globalThis.__copyTransportTest.clock.timeout(milliseconds);}};';
 const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } });
 const { completeCopy, encryptSecret, CopyAPIError } = await import("data:text/javascript;base64," + Buffer.from(outputText).toString("base64"));
 const key = "test-only-private-key";
@@ -32,6 +36,7 @@ function reset(overrides = {}) {
   state.settings = { ...settings, ...overrides };
   state.requests = [];
   state.timeouts = [];
+  state.clock = copyClock();
   state.respond = () => { throw new Error("No test response configured"); };
 }
 
@@ -52,7 +57,7 @@ test("B.AI DeepSeek copy transport preserves the saved model and credential at t
     state.respond = () => Response.json(completedResponse());
     assert.deepEqual(await completeCopy("test-owner", messages), { content: '{"copies":[]}', model: textModel });
     assert.equal(state.requests.length, 1);
-    assert.deepEqual(state.timeouts, [60_000]);
+    assert.deepEqual(state.timeouts, [COPY_GENERATION_TIMEOUT_MS]);
     const [url, request] = state.requests[0];
     assert.equal(url, "https://api.b.ai/v1/responses");
     assert.equal(request.method, "POST");
@@ -91,18 +96,36 @@ test("other hosts and other models retain the generic chat request without B.AI 
     { baseUrl: "https://api.b.ai.example.com/v1/images/edits" },
     { textModel: "another-text-model" },
     { textModel: "deepseek-v4.1-flash-extra" },
+    { baseUrl: "https://api.example.com/v1", textModel: "qwen3.8-flash" },
+    { baseUrl: "https://api.b.ai.example.com/v1", textModel: "qwen3.8-flash" },
+    { textModel: "qwen3.8-flash-extra" },
+    { textModel: "qwen3.8-max" },
   ]) {
     reset(overrides);
     state.respond = () => Response.json({ choices: [{ finish_reason: "stop", message: { content: ' {"copies":[]} ' } }] });
     assert.deepEqual(await completeCopy("test-owner", messages), { content: '{"copies":[]}', model: state.settings.textModel });
     assert.equal(state.requests.length, 1);
-    assert.deepEqual(state.timeouts, [60_000]);
+    assert.deepEqual(state.timeouts, [COPY_GENERATION_TIMEOUT_MS]);
     const [url, request] = state.requests[0];
     assert.equal(url, connection.customAPIEndpoint(state.settings.baseUrl, "chat/completions"));
     assert.equal(request.headers.Authorization, "Bearer " + key);
     assert.equal(request.redirect, "error");
     assert.deepEqual(JSON.parse(request.body), {
       model: state.settings.textModel, messages, stream: false, max_tokens: 4096,
+    });
+  }
+});
+
+test("only the exact B.AI Qwen3.8-Flash model disables thinking on the chat endpoint", async () => {
+  for (const textModel of ["qwen3.8-flash", "Qwen3.8-Flash", "QWEN3.8-FLASH"]) {
+    reset({ textModel });
+    state.respond = () => Response.json({ choices: [{ finish_reason: "stop", message: { content: '{"copies":[]}' } }] });
+    assert.deepEqual(await completeCopy("test-owner", messages), { content: '{"copies":[]}', model: textModel });
+    assert.equal(state.requests.length, 1);
+    const [url, request] = state.requests[0];
+    assert.equal(url, "https://api.b.ai/v1/chat/completions");
+    assert.deepEqual(JSON.parse(request.body), {
+      model: textModel, stream: false, messages, max_tokens: 4096, enable_thinking: false,
     });
   }
 });
@@ -131,9 +154,57 @@ test("timeout returns an actionable safe message and does not retry or fall back
   for (const name of ["TimeoutError", "AbortError"]) {
     reset();
     state.respond = () => { throw new DOMException("internal address", name); };
-    await assert.rejects(completeCopy("test-owner", messages), error => error instanceof CopyAPIError && /60 秒/.test(error.message) && !error.message.includes("internal address"));
+    await assert.rejects(completeCopy("test-owner", messages), error => error instanceof CopyAPIError && /3 分钟/.test(error.message) && !error.message.includes("internal address"));
     assert.equal(state.requests.length, 1);
     assert.equal(state.requests[0][0], "https://api.b.ai/v1/responses");
+  }
+});
+
+test("slow Responses and generic chat headers and bodies can finish after the former 60-second deadline", async () => {
+  for (const textModel of ["DeepSeek-V4.1-Flash", "qwen3.8-flash"]) {
+    reset({ textModel });
+    state.respond = (_url, request) => {
+      state.clock.advance(70_000);
+      request.signal.throwIfAborted();
+      return new Response(new ReadableStream({
+        pull(controller) {
+          state.clock.advance(50_000);
+          request.signal.throwIfAborted();
+          const payload = textModel === "DeepSeek-V4.1-Flash" ? completedResponse() : {
+            choices: [{ finish_reason: "stop", message: { content: '{"copies":[]}' } }],
+          };
+          controller.enqueue(new TextEncoder().encode(JSON.stringify(payload)));
+          controller.close();
+        },
+      }));
+    };
+    assert.deepEqual(await completeCopy("test-owner", messages), { content: '{"copies":[]}', model: textModel });
+    assert.equal(state.clock.now, 120_000);
+    assert.equal(state.requests.length, 1);
+    assert.equal(JSON.parse(state.requests[0][1].body).model, textModel);
+  }
+});
+
+test("the three-minute provider deadline bounds both response headers and body without retrying", async () => {
+  assert.equal(COPY_GENERATION_TIMEOUT_MS, 180_000);
+  assert.equal(COPY_CLIENT_TIMEOUT_MS, 195_000);
+  for (const phase of ["headers", "body"]) {
+    reset();
+    state.respond = (_url, request) => {
+      if (phase === "headers") {
+        state.clock.advance(COPY_GENERATION_TIMEOUT_MS);
+        request.signal.throwIfAborted();
+      }
+      return new Response(new ReadableStream({
+        pull(controller) {
+          state.clock.advance(COPY_GENERATION_TIMEOUT_MS);
+          controller.error(request.signal.reason);
+        },
+      }));
+    };
+    await assert.rejects(completeCopy("test-owner", messages), error => error instanceof CopyAPIError && /3 分钟/.test(error.message));
+    assert.equal(state.requests.length, 1, phase);
+    assert.equal(state.requests[0][1].signal.aborted, true, phase);
   }
 });
 

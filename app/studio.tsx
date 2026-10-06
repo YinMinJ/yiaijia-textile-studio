@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { COPY_CLIENT_TIMEOUT_MS, COPY_SLOW_NOTICE_MS, COPY_TIMEOUT_MESSAGE, COPY_SLOW_MESSAGE } from "@/lib/copy-request";
 import ModelSettings from "./model-settings";
 import DesignPlan from "./design-plan";
 import CategoryPicker from "./category-picker";
@@ -446,13 +447,14 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
     copyRunning.current = true;
     setCopyResult(null);
     setBusy("大模型正在编写其他图片的文案 · 首图文案由你填写");
+    const slowNotice = setTimeout(() => setBusy(COPY_SLOW_MESSAGE), COPY_SLOW_NOTICE_MS);
     try {
       const request = buildCopyInput(original);
       const response = await fetch("/api/generate-copy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(request),
-        signal: AbortSignal.timeout(75000),
+        signal: AbortSignal.timeout(COPY_CLIENT_TIMEOUT_MS),
       });
       const data = (await response.json()) as { copies?: GeneratedCopy[]; model?: string; error?: string };
       if (!response.ok || !data.copies) throw new Error(data.error || "文案生成失败，请重试。");
@@ -469,10 +471,11 @@ export default function Studio({ signedIn }: { signedIn: boolean }) {
       });
       toast.success("其他图文案已生成，可逐张修改；首图文案保持不变。");
     } catch (e) {
-      const message = (e as Error).name === "TimeoutError" ? "文案生成超时，原文案已保留。可稍后重试。" : (e as Error).message;
+      const message = (e as Error).name === "TimeoutError" || (e as Error).name === "AbortError" ? COPY_TIMEOUT_MESSAGE + " 原文案已保留。" : (e as Error).message;
       setCopyResult({ projectId: original.id, message, error: true });
       toast.error(message);
     } finally {
+      clearTimeout(slowNotice);
       copyRunning.current = false;
       setBusy("");
     }

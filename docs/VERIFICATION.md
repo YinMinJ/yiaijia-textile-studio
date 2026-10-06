@@ -1,5 +1,13 @@
 # 织境验证记录
 
+## Qwen 文案反复超时修复（2026-10-06，待生产部署验收）
+
+- 复查时已保存的文案模型为 `qwen3.8-flash`。服务商记录的同类请求耗时为约48秒、68.638秒和97.724秒；原后端60秒、前端75秒的等待上限会截断仍在处理的请求。此前一次成功不代表反复超时问题已解决。
+- 将文案请求后端上限调整为180秒，前端保留15秒余量，等待上限为195秒；等待45秒后显示较慢提示。继续保留已有文案，禁止重复点击，不自动重试或切换模型。
+- 仅对 `api.b.ai` 的 `qwen3.8-flash`（模型名大小写不敏感）在原 Chat Completions 请求中加入 `enable_thinking: false`。B.AI 的[模型页](https://docs.b.ai/llmservice/models/qwen3-8-flash/)将该参数描述为 QwenCloud 能力，统一[API 参考](https://docs.b.ai/llmservice/api/)未明确承诺转发此字段，因此本次兼容性依据实际探测，不推广到其他提供商或 Qwen 型号。Qwen 保持 Chat 接口；B.AI 文档列出的 Responses 支持系列为 GPT 与 DeepSeek。
+- 使用完整的4张床上套件文案提示进行一次直接探测，返回 HTTP 200、`finish_reason=stop`，耗时5.285秒；输入1041 tokens、输出185 tokens、合计1226 tokens，4张文案完整返回。响应没有 `reasoning_content` 字段；未返回显式推理 token 数，不能据此记录为“推理0 tokens”。
+- 上述直接探测通过；本节记录代码修复与探测结果。生产尚未升级至本次修复，浏览器完整流程及首图保留情况仍待部署后验收，不以一次快速探测承诺固定响应时间。
+
 ## 当前服务器升级与文案复验
 
 - 生产已切换到 `0779e99576b776623669c812dd714f39bf3d09d0`，对应 GitHub Actions [37437197486](https://github.com/YinMinJ/yiaijia-textile-studio/actions/runs/37437197486)。安装发布包 SHA256 为 `b31bcd57b913b12fb702d0a10cb95849ed1ad164d86d28e7cfbcfe521dce397d`；CI 完成144项测试、Vue/Next类型检查、生产构建及两组隔离HTTP验收；未在生产服务器安装构建依赖或编译。

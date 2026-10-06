@@ -16,6 +16,7 @@ globalThis.__imageTransportTest = state;
 const source = (await readFile(new URL("../lib/model-api.ts", import.meta.url), "utf8"))
   .replace('import { getEncryptionSecret } from "./server-secrets";', 'const getEncryptionSecret = () => globalThis.__imageTransportTest.secret;')
   .replace('import { db } from "./server-store";', 'const db = () => ({prepare: () => ({bind: () => ({first: async () => globalThis.__imageTransportTest.settings})})});')
+  .replace('from "./copy-request"', `from ${JSON.stringify(new URL("../lib/copy-request.ts", import.meta.url).href)}`)
   .replace(/import \{\s+publicHttps,[\s\S]*?\} from "\.\/model-connection";/, 'const {publicHttps, normalizeModelBase, providerError, inspectModelList, customAPIEndpoint, imageRequestParameters, IMAGE_GENERATION_TIMEOUT_MS} = globalThis.__imageTransportTest.connection;')
   .replace('export { publicHttps, normalizeModelBase } from "./model-connection";', '')
   + '\nconst fetch = async (...args) => { globalThis.__imageTransportTest.requests.push(args); return globalThis.__imageTransportTest.respond(...args); };'

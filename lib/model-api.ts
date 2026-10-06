@@ -1,5 +1,6 @@
 import { getEncryptionSecret } from "./server-secrets";
 import { db } from "./server-store";
+import { COPY_GENERATION_TIMEOUT_MS, COPY_TIMEOUT_MESSAGE } from "./copy-request";
 import type { ImageProtocol, ImageQuality, ImageResolution } from "./model-connection";
 import {
   publicHttps,
@@ -150,8 +151,12 @@ export async function completeCopy(
   // B.AI documents non-thinking mode for this model through Responses.
   // Keep the bounded copy budget for visible text instead of internal reasoning.
   // https://docs.b.ai/llmservice/models/deepseek-v4-1-flash/
-  const useResponses = new URL(settings.baseUrl).hostname === "api.b.ai" &&
+  const isBai = new URL(settings.baseUrl).hostname === "api.b.ai";
+  const useResponses = isBai &&
     settings.textModel.toLowerCase() === "deepseek-v4.1-flash";
+  // Verified against B.AI's Qwen3.8-Flash chat endpoint: short copy can return
+  // directly without spending most of the output budget on reasoning.
+  const disableQwenThinking = isBai && settings.textModel.toLowerCase() === "qwen3.8-flash";
   let response: Response;
   let raw: string;
   try {
@@ -169,13 +174,14 @@ export async function completeCopy(
         ...(useResponses
           ? { input: messages, max_output_tokens: 4096, reasoning: { effort: "none" } }
           : { messages, max_tokens: 4096 }),
+        ...(disableQwenThinking ? { enable_thinking: false } : {}),
       }),
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(COPY_GENERATION_TIMEOUT_MS),
     });
     raw = new TextDecoder().decode(await limitedBytes(response, 1024 * 1024));
   } catch (e) {
     if ((e as Error).name === "TimeoutError" || (e as Error).name === "AbortError")
-      throw new CopyAPIError("文案接口超过 60 秒未完成，请稍后检查服务商结果再重试。");
+      throw new CopyAPIError(COPY_TIMEOUT_MESSAGE);
     if ((e as Error).message === "接口返回内容超过限制。")
       throw new CopyAPIError("文案接口返回内容超过限制。");
     throw new CopyAPIError("无法连接文案 API，请检查接口地址、网络和服务商状态。");
