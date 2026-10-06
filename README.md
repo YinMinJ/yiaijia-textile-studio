@@ -2,6 +2,8 @@
 
 独立运行的家纺商品图设计工作台，支持被子和床上套件、手写首图文案、大模型编写其余图片文案，以及主图和详情页导出。浏览器访问 **http://127.0.0.1:3000**。
 
+工作台界面与交互使用 **Vue 3 + Vite**，采用浅色布局、暖橙色操作按钮和独立的商品编辑流程。Next.js 负责 API、本地存储与可选账户登录，工作台由 Vue 渲染，不依赖 ChatGPT Sites 托管。
+
 ## 首次安装
 
 需要 Node.js 24.11+ 和 pnpm。克隆仓库并进入项目目录后执行：
@@ -80,14 +82,35 @@ AI 生成需要在“自定义 API”填写可用图片接口，调用所配置�
 
 ## 开发与重新构建
 
-需要 Node.js 24.11+ 和 pnpm，当前电脑已具备所需环境。
+需要 Node.js 24.11+ 和 pnpm。源码分工如下：
+
+| 目录 | 用途 |
+| --- | --- |
+| `frontend/` | Vue 3 工作台、首页、模板、作品、素材、商品编辑与 API 设置 |
+| `lib/` | 共用商品模型、文案处理、画布排版及后端数据逻辑 |
+| `app/api/` | Next.js API；`app/login/` 提供可选账户登录 |
+| `app/route.ts` | 鉴权后返回构建好的 Vue 工作台入口 |
+
+本地开发前先停止生产服务，避免占用 3000 端口：
+
+```powershell
+.\scripts\stop-local.ps1
+pnpm dev
+```
+
+`pnpm dev` 启动两个仅监听本机的服务：Vue / Vite 工作台位于 `http://127.0.0.1:3000`，Next.js API 开发服务位于 `http://127.0.0.1:3002`。浏览器使用 3000 端口，Vite 将 API、登录、样例与字体请求代理到 3002，开发数据仍保存在本机 `data/`。按 `Ctrl+C` 停止开发服务。
+
+构建与检查：
 
 ```powershell
 pnpm install --frozen-lockfile
 pnpm test
+pnpm typecheck
 pnpm build
 ```
 
-更新源代码后停止服务、重新构建，再启动。`scripts/verify-http.mjs` 在隔离临时库检查普通账号模式，包含上传、保存、权限、自定义 API 配置、旧配置兼容与停用、重启持久化；验证服务拦截外部 API 请求，不调用真实模型。
+`pnpm build:ui` 单独检查并构建 Vue 前端，生成到 `public/workbench/`。`pnpm build` 先执行前端构建，再构建 Next.js 生产后端；`pnpm start` 在 3000 端口启动完整应用，无需另外启动 Vite。生产模式中，Next.js 直接返回 Vue 入口 HTML 并提供静态资源与 API。
+
+更新源代码后停止服务、重新构建，再启动。`scripts/verify-http.mjs` 在隔离临时库检查普通账号模式，包含 Vue 入口与脚本/CSS、上传、保存、权限、自定义 API 配置、旧配置兼容与停用、重启持久化；验证服务拦截外部 API 请求，不调用真实模型。
 
 本次验证见 docs/VERIFICATION.md。

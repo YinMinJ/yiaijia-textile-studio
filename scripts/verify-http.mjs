@@ -133,6 +133,39 @@ globalThis.fetch = async () => {
   assert.equal((await request("/", { cookie: firstCookie })).status, 200);
   pass("独立账户登录与跨域来源拒绝");
 
+  response = await request("/", { cookie: firstCookie });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type"), /text\/html/i);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const workbenchHtml = await response.text();
+  assert.match(workbenchHtml, /<div\s+id=["']app["']/);
+  const vueModule = workbenchHtml.match(/<script\b(?=[^>]*\btype=["']module["'])[^>]*\bsrc=["'](\/workbench\/assets\/[^"']+\.js)["']/i);
+  const vueStylesheet = workbenchHtml.match(/\bhref=["'](\/workbench\/assets\/[^"']+\.css)["']/i);
+  assert.ok(vueModule, "workbench must reference the built Vue module");
+  assert.ok(vueStylesheet, "workbench must reference the built Vue stylesheet");
+  const vueModuleResponse = await request(vueModule[1], { cookie: firstCookie });
+  assert.equal(vueModuleResponse.status, 200);
+  assert.match(vueModuleResponse.headers.get("content-type"), /(?:java|ecma)script/i);
+  assert.ok((await vueModuleResponse.text()).length > 0, "Vue module must not be empty");
+  const vueStylesheetResponse = await request(vueStylesheet[1], { cookie: firstCookie });
+  assert.equal(vueStylesheetResponse.status, 200);
+  assert.match(vueStylesheetResponse.headers.get("content-type"), /text\/css/i);
+  const vueCss = await vueStylesheetResponse.text();
+  assert.ok(vueCss.length > 0, "Vue stylesheet must not be empty");
+  const fontUrls = [...new Set([...vueCss.matchAll(/url\(\s*["']?([^"'()\s]+\.woff2(?:\?[^"'()\s]*)?)["']?\s*\)/gi)].map((match) => match[1]))];
+  assert.equal(fontUrls.length, 3, "Vue stylesheet must include all three rounded font weights");
+  for (const fontUrl of fontUrls) {
+    const fontAddress = new URL(fontUrl, new URL(vueStylesheet[1], origin));
+    assert.equal(fontAddress.origin, origin, "rounded fonts must load from this app");
+    const fontResponse = await request(fontAddress.pathname + fontAddress.search, { cookie: firstCookie });
+    assert.equal(fontResponse.status, 200, `font must load: ${fontAddress.pathname}`);
+    assert.match(fontResponse.headers.get("content-type"), /font\/woff2/i);
+    const fontBytes = Buffer.from(await fontResponse.arrayBuffer());
+    assert.ok(fontBytes.length > 4, "rounded font must not be empty");
+    assert.equal(fontBytes.subarray(0, 4).toString("ascii"), "wOF2", "font response must contain actual WOFF2 bytes");
+  }
+  pass("登录后的真实 Vue 工作台 HTML、模块脚本、CSS 与三种圆体字体均可访问且入口禁止缓存");
+
   const bytes = await readFile(path.join(root, "public", "samples", "00224.jpg"));
   const form = new FormData();
   form.append("file", new Blob([bytes], { type: "image/jpeg" }), "商品验收.jpg");
