@@ -1,0 +1,158 @@
+name: Build Zhijing server release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/zhijing-server-release.yml
+      - scripts/package-server-release.mjs
+
+# Dependency installation and application code never receive a write token.
+permissions: {}
+
+concurrency:
+  group: zhijing-server-${{ github.sha }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      APP_LOCAL_MODE: "0"
+      NEXT_PUBLIC_APP_LOCAL_MODE: "0"
+      NEXT_PUBLIC_APP_BASE_PATH: /zhijing
+      NEXT_TELEMETRY_DISABLED: "1"
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - name: Check out the exact source commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install the target Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.19.0
+          architecture: x64
+
+      - name: Reject private environment files before compiling
+        run: |
+          node --input-type=module <<'NODE'
+          import { readdir } from 'node:fs/promises';
+          const privateFiles = (await readdir('.')).filter(name => /^\.env/i.test(name) && name !== '.env.example');
+          if (privateFiles.length) throw new Error('A server release must be compiled from a checkout without private environment files.');
+          NODE
+
+      - name: Install the pinned package manager and locked Linux dependencies
+        run: |
+          npm install --global pnpm@11.25.0
+          test "$(node --version)" = "v24.19.0"
+          test "$(pnpm --version)" = "11.25.0"
+          pnpm install --frozen-lockfile --network-concurrency=8 --fetch-timeout=300000
+
+      - name: Check types and run isolated tests
+        run: |
+          pnpm typecheck
+          pnpm test
+
+      - name: Build Vue and the Next standalone service
+        run: pnpm build
+
+      - name: Verify production HTTP behavior without upstream model calls
+        run: node scripts/verify-http.mjs
+
+      - name: Package the Linux x64 release
+        run: node scripts/package-server-release.mjs
+
+      - name: Verify the extracted release without the source checkout dependencies
+        run: |
+          archive="zhijing-linux-x64-${GITHUB_SHA}.tar.gz"
+          test -f ".next/server-release/${archive}"
+          (cd .next/server-release && sha256sum --check "${archive}.sha256")
+          verification_dir="$(mktemp -d "${RUNNER_TEMP}/zhijing-release-verification.XXXXXX")"
+          tar --extract --gzip --file ".next/server-release/${archive}" --directory "$verification_dir" --no-same-owner
+          cd "$verification_dir"
+          node scripts/verify-http.mjs
+
+      - name: Save the verified archive and checksum
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zhijing-server-${{ github.sha }}
+          path: |
+            .next/server-release/zhijing-linux-x64-${{ github.sha }}.tar.gz
+            .next/server-release/zhijing-linux-x64-${{ github.sha }}.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+          # The tar already contains audited .next runtime files. Upload just
+          # the two explicit files beneath the hidden build directory.
+          include-hidden-files: true
+
+  publish:
+    needs: build
+    if: github.repository == 'YinMinJ/yiaijia-textile-studio' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      # This job does not check out or execute repository/dependency code.
+      - name: Download the verified build from this workflow run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: zhijing-server-${{ github.sha }}
+          path: release
+
+      - name: Publish a commit-specific public release without replacing assets
+        working-directory: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_REPOSITORY" = "YinMinJ/yiaijia-textile-studio" ]]
+          tag="zhijing-server-${GITHUB_SHA}"
+          archive="zhijing-linux-x64-${GITHUB_SHA}.tar.gz"
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 2
+          test -f "$archive"
+          test -f "${archive}.sha256"
+          sha256sum --check "${archive}.sha256"
+
+          # A re-run can reuse a completed release. Partial releases require
+          # review; existing assets are never uploaded with --clobber.
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,assets > existing-release.json; then
+            jq --exit-status --arg archive "$archive" '
+              .isDraft == false and
+              ([.assets[].name] | sort) == ([$archive, ($archive + ".sha256")] | sort)
+            ' existing-release.json > /dev/null
+            printf 'The immutable release %s already exists; no files were changed.\n' "$tag"
+            exit 0
+          fi
+
+          cat > release-notes.md <<NOTES
+          Linux x64 standalone service, built and tested on Ubuntu 22.04.
+          Source commit: ${GITHUB_SHA}
+          Runtime: Node.js 24.19.0; package manager used for build: pnpm 11.25.0.
+          Public application path: /zhijing; build local mode: disabled.
+
+          Download both assets from this exact tag, then run sha256sum --check ${archive}.sha256 before extracting into a new release directory.
+          No dependency install or application build is needed on the server.
+          The extracted release-manifest.json records the source, runtime and build settings.
+          Run scripts/start-server.mjs with the server's existing EnvironmentFile, including APP_LOCAL_MODE=0, NEXT_PUBLIC_APP_LOCAL_MODE=0, NEXT_PUBLIC_APP_BASE_PATH=/zhijing, APP_URL, PORT and an external DATA_DIR.
+          The archive includes the account CLI and isolated HTTP verification script. It excludes environment files, accounts, databases, uploaded assets and local encryption keys.
+          Tests and both HTTP verification runs do not call a real model API.
+          NOTES
+
+          gh release create "$tag" "$archive" "${archive}.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Zhijing Linux x64 ${GITHUB_SHA}" \
+            --notes-file release-notes.md \
+            --latest=false

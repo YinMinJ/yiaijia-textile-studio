@@ -8,6 +8,7 @@ User=zhijing
 Group=zhijing
 WorkingDirectory=/opt/zhijing/current
 EnvironmentFile=/etc/zhijing.env
+Environment=NODE_OPTIONS=--max-old-space-size=256
 ExecStart=/opt/zhijing/runtime/bin/node /opt/zhijing/current/scripts/start-server.mjs
 Restart=on-failure
 RestartSec=5
@@ -18,6 +19,12 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/opt/zhijing /var/lib/zhijing
+MemoryAccounting=true
+MemoryHigh=384M
+MemoryMax=512M
+MemorySwapMax=0
+OOMPolicy=kill
+OOMScoreAdjust=500
 
 [Install]
 WantedBy=multi-user.target

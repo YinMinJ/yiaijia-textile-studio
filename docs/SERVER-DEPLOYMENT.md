@@ -4,6 +4,10 @@
 
 ## 构建与运行
 
+小内存服务器应使用 GitHub Actions 在 Ubuntu 22.04 构建的 Linux x64 发布包，服务器仅下载、核对 SHA256、解包和运行。工作流为 `.github/workflows/zhijing-server-release.yml`，发布版本采用 `zhijing-server-<完整提交 SHA>`，不覆盖旧版本。构建和隔离 HTTP 验证均使用临时数据与禁止上游请求的测试配置；发布包不包含作品、数据库、API 配置或登录资料。
+
+工作流或打包脚本的提交会自动触发构建；普通应用更新后，需在 GitHub Actions 中对 `master` 手动运行该工作流。构建发布包不会自动修改生产服务器。
+
 服务器需要 Node.js 24.11+ 和 pnpm。子路径与登录模式在构建时确定；服务器与本机根路径版本分别构建。
 
 ```sh
@@ -13,6 +17,8 @@ APP_LOCAL_MODE=0 NEXT_PUBLIC_APP_LOCAL_MODE=0 NEXT_PUBLIC_APP_BASE_PATH=/zhijing
 运行变量见 `deploy/zhijing.env.example`：`APP_URL` 只填写域名来源 `https://jxcymj.asia`，路径由 `NEXT_PUBLIC_APP_BASE_PATH` 配置。必须设置 `APP_LOCAL_MODE=0`，服务器通过邮箱和密码登录。服务仅监听 `127.0.0.1:3010`，由现有 HTTPS Nginx 反向代理。
 
 `deploy/zhijing.service` 使用 `/opt/zhijing/current` 发布目录、`/opt/zhijing/runtime/bin/node` 和 `/var/lib/zhijing` 数据目录；部署时建立专用系统账户 `zhijing`。Nginx 片段 `deploy/nginx-location.conf` 应加入现有域名 HTTPS 服务块，检查 `nginx -t` 后重载。先检查 3010 未被占用，再启动服务。
+
+服务器运行单元限制 V8 旧堆为 256 MiB，并在 cgroup v2 下使用 `MemoryHigh=384M`、`MemoryMax=512M`、`MemorySwapMax=0`。这些上限只约束织境，不能保证其他服务的内存用量；大图或并发任务可能使织境被终止并重启。Ubuntu 22.04 可通过 `stat -fc %T /sys/fs/cgroup` 确认 `cgroup2fs`，启动后检查 `systemctl show zhijing -p MemoryCurrent -p MemoryHigh -p MemoryMax -p MemorySwapMax`。不要在共用的小内存生产服务器上执行依赖安装和生产编译。
 
 管理员账户用 `scripts/create-user.mjs` 创建，密码通过交互输入或标准输入 JSON 传递，不作为命令行参数。没有公开注册功能。每个账户独立保存作品、素材和 API 配置，退出登录会撤销当前会话。
 
