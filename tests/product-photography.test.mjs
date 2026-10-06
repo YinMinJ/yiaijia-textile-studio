@@ -36,28 +36,57 @@ test("main and detail prompts direct different image ratios and safe composition
   assert.match(mainPlan.framing, /短标题安全区在右上方/);
   const split = buildPhotographyPlan(project, { ...main, composition: "split" });
   const minimal = buildPhotographyPlan(project, { ...main, composition: "minimal" });
-  assert.match(split.framing, /图文分区.*下缘约21%/);
+  assert.match(split.framing, /短标题安全区在右上方/);
+  assert.match(split.framing, /文案直接叠在真实照片上/);
+  assert.match(split.framing, /不额外添加白色、奶油色留白条或照片外文案区/);
   assert.match(minimal.framing, /留白陈列.*65%/);
   assert.notEqual(split.framing, minimal.framing);
 });
 
-test("VIP photographic safety zones agree with main hero, detail hero and scene caption placement", () => {
+test("photography follows transparent corner typography for every template, image kind and composition", () => {
   const project = sampleProject();
-  const mainHero = project.modules.find(module => module.kind === "main" && module.section === "hero");
-  const detailHero = project.modules.find(module => module.kind === "detail" && module.section === "hero");
-  const scene = project.modules.find(module => module.section === "scene");
-  for (const composition of ["auto", "immersive", "minimal"]) {
-    const main = buildPhotographyPlan(project, { ...mainHero, composition });
-    assert.match(main.framing, /短标题安全区在右上方/);
-    assert.match(main.framing, /27%至94%.*3%至22%/);
-    assert.doesNotMatch(main.framing, /左上方.*短标题/);
+  for (const template of ["vip", "warm", "clean", "editorial"]) {
+    for (const module of project.modules) {
+      for (const composition of ["auto", "immersive", "split", "minimal"]) {
+        const plan = buildPhotographyPlan({ ...project, template }, { ...module, composition });
+        assert.match(plan.framing, /文案.*不使用填充背景/);
+        assert.match(plan.framing, /短标题安全区在右上方/);
+        assert.match(plan.framing, /30%至95%.*3%至30%/);
+        assert.match(plan.framing, /一至两行大标题配短说明/);
+        assert.match(plan.framing, /不加渐变遮罩/);
+        assert.match(plan.framing, /所有摄影版式都保持文字区域下方有真实照片/);
+        assert.match(plan.framing, /不额外添加白色、奶油色留白条或照片外文案区/);
+        assert.doesNotMatch(plan.framing, /照片之外的|画布留白内|左下方小卡|独立底栏中|窄栏.*展开|信息卡/);
+      }
+    }
   }
-  assert.match(buildPhotographyPlan(project, detailHero).framing, /标题在左上方/);
-  assert.match(buildPhotographyPlan(project, { ...mainHero, composition: "split" }).framing, /下缘约21%.*右侧对齐/);
-  assert.match(buildPhotographyPlan(project, { ...detailHero, composition: "split" }).framing, /文案在下缘/);
-  assert.match(buildPhotographyPlan(project, scene).framing, /左下方小卡/);
-  assert.match(buildPhotographyPlan(project, { ...scene, composition: "immersive" }).framing, /文案在下缘.*低对比背景上/);
-  assert.match(buildPhotographyPlan(project, { ...scene, composition: "split" }).framing, /文案在下缘.*独立底栏/);
+});
+
+test("manual text corner and color change the real safe area without fabricating a colored text backing", () => {
+  const project = sampleProject();
+  const hero = project.modules[0];
+  for (const [textPosition, words, x, y] of [
+    ["top-right", "右上方", "30%至95%", "3%至30%"],
+    ["top-left", "左上方", "5%至70%", "3%至30%"],
+    ["bottom-right", "右下方", "30%至95%", "70%至96%"],
+    ["bottom-left", "左下方", "5%至70%", "70%至96%"],
+  ]) {
+    const overlay = buildPhotographyPlan(project, { ...hero, textPosition, textColor: "light" });
+    assert.ok(overlay.framing.includes(`短标题安全区在${words}`));
+    assert.ok(overlay.framing.includes(x));
+    assert.ok(overlay.framing.includes(y));
+    assert.match(overlay.framing, /较深的真实背景或自然阴影.*不将商品染暗/);
+    for (const composition of ["split", "minimal"]) {
+      const direct = buildPhotographyPlan(project, { ...hero, composition, textPosition });
+      assert.ok(direct.framing.includes(`短标题安全区在${words}`));
+      assert.ok(direct.framing.includes(x));
+      assert.ok(direct.framing.includes(y));
+      assert.match(direct.framing, /文案直接叠在真实照片上/);
+      assert.doesNotMatch(direct.framing, /照片之外的|画布留白内/);
+    }
+  }
+  assert.match(buildPhotographyPlan(project, { ...hero, textColor: "dark" }).framing, /较浅的真实背景或实际浅色布面，不漂白商品/);
+  assert.equal(buildPhotographyPlan(project, { ...hero, textPosition: "auto" }).framing, buildPhotographyPlan(project, hero).framing);
 });
 
 test("a prompt transmits verified product information as bounded data without reference URLs or filenames", () => {
@@ -107,6 +136,26 @@ test("bedding photography preserves set contents and test generation assesses co
   assert.match(testPrompt, /新的自然暖白家居背景/);
   assert.match(testPrompt, /主体占约 80%/);
   assert.match(testPrompt, /不生成任何文字/);
+  assert.match(testPrompt, /右上方约 30%/);
+  assert.match(testPrompt, /不画白色文案框、金色胶囊、底栏、渐变遮罩或半透明填充/);
+});
+
+test("reference bedding style never invents AB faces, zipper structures, sheet angles or washing claims", () => {
+  const project = { ...sampleProject(), category: "bedding-set" };
+  project.modules = makeModules(project);
+  const pattern = project.modules.find(module => module.section === "pattern");
+  const craft = project.modules.find(module => module.section === "craft");
+  const components = project.modules.find(module => module.section === "components");
+  const original = project.assets[0];
+  const patternPlan = buildPhotographyPlan(project, pattern, [original]);
+  assert.match(patternPlan.shot, /只有商品资料明确确认双面设计且原照片实际展示两面时/);
+  assert.match(patternPlan.shot, /不能补造AB版、背面格纹或新花色/);
+  assert.match(buildPhotographyPlan(project, craft, [original]).shot, /只有原照片确实拍到拉链/);
+  assert.match(buildPhotographyPlan(project, components, [{ ...original, role: "枕套" }]).shot, /枕套证据镜头.*不补画枕芯、第二只枕头/);
+  assert.match(buildPhotographyPlan(project, components, [{ ...original, role: "床单" }]).shot, /床单证据镜头.*不把圆角改成直角/);
+  const prompt = buildProductPrompt(project, pattern, [original]);
+  assert.match(prompt, /禁止在照片中画白色文案框、金色胶囊、底栏、渐变遮罩或半透明填充/);
+  assert.match(prompt, /不得借参考图添加AB双版、金属拉链、洗衣机、水花、认证标识、安全、色牢度或健康功效示意/);
 });
 
 const state = { project: sampleProject(), cached: null, calls: [], references: [], authenticated: true, writes: [], lockChanges: 1 };

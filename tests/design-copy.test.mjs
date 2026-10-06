@@ -173,6 +173,29 @@ test("commercial copy assigns facts by section and separates main-image headline
   assert.equal(next.modules.find(module => module.section === "texture").subtitle, "已确认棉面料");
 });
 
+test("reference-led copy remains short for unboxed large-photo headlines and never borrows unsupported product claims", () => {
+  const project = { ...sampleProject(), category: "bedding-set" };
+  Object.assign(project.info, { material: "", care: "", sellingPoints: "", setContents: "被套1件、床单1件、枕套2件" });
+  project.modules = makeModules(project);
+  const input = buildCopyInput(project);
+  const messages = buildCopyMessages(input);
+  const directions = messages[0].content;
+  assert.match(directions, /文案将直接叠在大幅商品照片上/);
+  assert.match(directions, /不依赖底色框、胶囊标签或长段落/);
+  assert.match(directions, /一至两行大标题/);
+  assert.match(directions, /subtitle 建议 8 至 22 字/);
+  assert.match(directions, /从 sellingPoints 中挑选最相关的一个已确认卖点/);
+  assert.match(directions, /AB双版、正反两用或双面设计必须在商品资料中明确确认/);
+  assert.match(directions, /不能凭参考图给本商品添加金属拉链、包边或直角床单/);
+  assert.match(directions, /参考图只供摄影构图与文字层级参考，不是本商品事实/);
+  assert.match(directions, /100%全棉、活性印染、着色安全、不易褪色、色牢度高、健康裸睡、高支高密、机洗或认证/);
+  assert.match(directions, /除非 info 对该事实有明确记录/);
+  assert.deepEqual(JSON.parse(messages[1].content), input);
+  assert.equal(input.info.material, "");
+  assert.equal(input.info.care, "");
+  assert.equal(input.info.sellingPoints, "");
+});
+
 let authorized = true;
 let providerCalls = [];
 let providerFailure = null;

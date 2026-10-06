@@ -113,3 +113,27 @@ test("Vue zoom editing preserves the completed image and saves the numeric scale
   assert.equal(saved.modules[0].cropY, 40);
   assert.equal(state.requests.filter(item => item.url === "/api/generate-image").length, 0);
 });
+
+test("Vue multiline copy, text position and color edits keep completed photos and never request generation", async () => {
+  const { studio, project, hero } = setup();
+  const generated = { ...project.assets[0], id: "saved-generated", generated: true };
+  studio.project.value = { ...project, sample: undefined, generation: "ai", generationBatch: "preserved-batch", assets: [...project.assets, generated], modules: project.modules.map(module => module.id === hero.id ? { ...module, imageId: generated.id, aiStatus: "succeeded" } : module) };
+  studio.editingId.value = hero.id;
+  studio.updateModule({ title: "时尚双版设计\n营造卧室美学", textPosition: "top-right", textColor: "dark" });
+  studio.updatePlan(hero.id, { textPosition: "bottom-left", textColor: "light" });
+  const edited = studio.project.value.modules[0];
+  assert.equal(edited.title, "时尚双版设计\n营造卧室美学");
+  assert.equal(edited.textPosition, "bottom-left");
+  assert.equal(edited.textColor, "light");
+  assert.equal(edited.imageId, generated.id);
+  assert.equal(edited.aiStatus, "succeeded");
+  assert.equal(studio.project.value.workflow, "complete");
+  assert.equal(studio.project.value.generationBatch, "preserved-batch");
+  assert.equal(state.requests.length, 0);
+  await studio.save();
+  const saved = JSON.parse(state.requests.find(item => item.url === "/api/projects").request.body);
+  assert.equal(saved.modules[0].title, edited.title);
+  assert.equal(saved.modules[0].textPosition, "bottom-left");
+  assert.equal(saved.modules[0].textColor, "light");
+  assert.equal(state.requests.filter(item => ["/api/generate-image", "/api/generate-copy"].includes(item.url)).length, 0);
+});

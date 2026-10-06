@@ -193,6 +193,23 @@ globalThis.fetch = async () => {
   assert.equal(otherProjects.projects.length, 0);
   pass("项目保存、回读与跨账户覆盖拒绝");
 
+  const copyModule = {
+    id: "main-1", kind: "main", index: 1, section: "hero", layout: 0,
+    title: "真实商品\n自然呈现", subtitle: "", imageId: asset.id, imageId2: "",
+    sourceImageId: asset.id, cropX: 50, cropY: 50, imageZoom: 1.15,
+    composition: "split", textPosition: "bottom-left", textColor: "light",
+  };
+  project.modules = [copyModule];
+  assert.equal((await jsonPost("/api/projects", project, firstCookie)).status, 200);
+  const typographySaved = (await (await request("/api/projects", { cookie: firstCookie })).json()).projects[0];
+  assert.deepEqual(typographySaved.modules[0], copyModule);
+  for (const invalid of [{ textPosition: "middle" }, { textColor: "filled" }]) {
+    assert.equal((await jsonPost("/api/projects", { ...project, modules: [{ ...copyModule, ...invalid }] }, firstCookie)).status, 400);
+  }
+  assert.deepEqual((await (await request("/api/projects", { cookie: firstCookie })).json()).projects[0].modules[0], copyModule);
+  await assertNoUpstreamRequests();
+  pass("无底色文案位置、字色与手动换行保存回读、拒绝无效枚举且不调用上游");
+
   const customSettings = { baseUrl: "https://image-api.example.com/v1/images/edits", model: "custom-image-model", textModel: "custom-copy-model" };
   response = await jsonPost("/api/model-settings", { ...customSettings, apiKey: fakeKey }, firstCookie);
   assert.equal(response.status, 200);
@@ -322,6 +339,7 @@ globalThis.fetch = async () => {
   await stop();
   await start();
   assert.equal((await (await request("/api/projects", { cookie: firstCookie })).json()).projects[0].id, project.id);
+  assert.deepEqual((await (await request("/api/projects", { cookie: firstCookie })).json()).projects[0].modules[0], copyModule);
   assert.equal((await request(asset.url, { cookie: firstCookie })).status, 200);
   assert.equal((await (await request("/api/model-settings", { cookie: firstCookie })).json()).keyHint, fakeKey.slice(-4));
   assert.equal((await (await request("/api/model-settings", { cookie: firstCookie })).json()).model, customSettings.model);

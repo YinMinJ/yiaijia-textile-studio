@@ -330,22 +330,48 @@ async function loadTs(source) {
 const route = await loadTs(routeSource);
 const post = data => route.POST(new Request("http://localhost/api/projects", { method: "POST", body: JSON.stringify(data) }));
 
-test("changing visual composition preserves generated results and manual hero copy", async () => {
+test("changing visual composition and unboxed text placement preserves generated results and manual hero copy", async () => {
   heldProjects.clear(); jobs = [];
   const p = { ...sampleProject(), id: randomUUID(), generation: "ai", workflow: "complete", generationBatch: randomUUID() };
-  p.modules[0] = { ...p.modules[0], title: "我的首图标题", subtitle: "", aiStatus: "succeeded" };
-  const next = updatePlanModule(p, p.modules[0].id, { composition: "immersive", imageZoom: 1.15 });
+  p.modules[0] = { ...p.modules[0], title: "我的首图标题\n第二行说明", subtitle: "", aiStatus: "succeeded" };
+  const next = updatePlanModule(p, p.modules[0].id, { composition: "immersive", imageZoom: 1.15, textPosition: "top-left", textColor: "light" });
   assert.equal(next.generationBatch, p.generationBatch);
-  assert.equal(next.modules[0].title, "我的首图标题");
+  assert.equal(next.modules[0].title, "我的首图标题\n第二行说明");
   assert.equal(next.modules[0].aiStatus, "succeeded");
   assert.equal((await post(next)).status, 200);
   const saved = (await (await route.GET()).json()).projects[0];
   assert.equal(saved.modules[0].composition, "immersive");
   assert.equal(saved.modules[0].imageZoom, 1.15);
+  assert.equal(saved.modules[0].textPosition, "top-left");
+  assert.equal(saved.modules[0].textColor, "light");
+  assert.equal(saved.modules[0].title, p.modules[0].title, "explicit line breaks survive persistence");
   assert.equal(updateProjectTemplate(next, "warm").modules[0].composition, "immersive");
   assert.equal(updateProjectTemplate(next, "warm").modules[0].imageZoom, 1.15);
+  assert.equal(updateProjectTemplate(next, "warm").modules[0].textPosition, "top-left");
+  assert.equal(updateProjectTemplate(next, "warm").modules[0].textColor, "light");
   assert.equal((await post({ ...next, modules: [{ ...next.modules[0], composition: "broken" }] })).status, 400);
   assert.equal((await post({ ...next, modules: [{ ...next.modules[0], imageZoom: 2.1 }] })).status, 400);
+  assert.equal((await post({ ...next, modules: [{ ...next.modules[0], textPosition: "center" }] })).status, 400);
+  assert.equal((await post({ ...next, modules: [{ ...next.modules[0], textColor: "#000000" }] })).status, 400);
+});
+
+test("all supported text positions and colors round trip while legacy modules remain compatible", async () => {
+  heldProjects.clear(); jobs = [];
+  const p = { ...sampleProject(), id: randomUUID() };
+  const savedLegacy = (await (await post(p)).json()).project;
+  assert.deepEqual(savedLegacy.modules, p.modules);
+  assert.equal(savedLegacy.modules[0].textPosition, undefined);
+  assert.equal(savedLegacy.modules[0].textColor, undefined);
+  for (const textPosition of ["auto", "top-right", "top-left", "bottom-right", "bottom-left"]) {
+    for (const textColor of ["auto", "dark", "light"]) {
+      const updated = updatePlanModule(p, p.modules[0].id, { textPosition, textColor });
+      assert.equal((await post(updated)).status, 200);
+      const reloaded = (await (await route.GET()).json()).projects[0];
+      assert.equal(reloaded.modules[0].textPosition, textPosition);
+      assert.equal(reloaded.modules[0].textColor, textColor);
+      assert.deepEqual(reloaded.modules.slice(1), p.modules.slice(1));
+    }
+  }
 });
 
 

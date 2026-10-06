@@ -1,5 +1,7 @@
 export type TemplateId = "vip" | "warm" | "clean" | "editorial";
 export type ProductCategory = "quilt" | "bedding-set";
+export type TextPosition = "auto" | "top-right" | "top-left" | "bottom-right" | "bottom-left";
+export type TextColor = "auto" | "dark" | "light";
 export type ModuleSection =
   | "hero"
   | "benefits"
@@ -49,6 +51,8 @@ export type DesignModule = {
   layout: number;
   section?: ModuleSection;
   composition?: "auto" | "immersive" | "split" | "minimal";
+  textPosition?: TextPosition;
+  textColor?: TextColor;
   sourceImageId?: string;
   sourceImageId2?: string;
   aiStatus?: "pending" | "succeeded" | "failed";
@@ -82,7 +86,7 @@ export const categories: CategoryProfile[] = [
     id: "quilt",
     name: "被子",
     referenceUrl: "https://detail.vip.com/detail-1714230467-6922096046911460931.html",
-    summary: "叠被大图突出真实蓬松感，米白底配黑色短标题与驼橙色卖点；从整体、面料到填充与工艺逐层说明。",
+    summary: "叠被与铺床实拍铺满画面，黑色短标题直接叠在照片留白处，标题与说明右侧对齐、无底色；从整体、面料到填充与工艺逐层说明。",
     photoGuide: "建议准备叠放、整体铺床、面料特写、填充实拍、绗缝或包边工艺及颜色图。没有填充实拍时保留实物展示，不合成填充剖面。",
     palette: { paper: "#f7f1e7", ink: "#292521", muted: "#7b6d5d", accent: "#b77640", brand: "#743b39" },
   },
@@ -90,7 +94,7 @@ export const categories: CategoryProfile[] = [
     id: "bedding-set",
     name: "床上套件",
     referenceUrl: "https://detail.vip.com/detail-1714230467-6921823509075762179.html",
-    summary: "完整铺床场景展示花型与搭配，暖日光和奶油色衬底，标题置于画面上方；依次看花型、面料、套件组成与工艺。",
+    summary: "近景铺床与面料特写展示真实花型，暖日光大图搭配右侧对齐的黑色标题和说明，文字无底色；依次看花型、面料、套件组成与工艺。",
     photoGuide: "建议准备完整铺床、被套正反面或花型近景、面料、被套、床单、枕套及工艺图；仅展示当前商品实际包含的件数与配件。",
     palette: { paper: "#fff8e8", ink: "#373027", muted: "#827354", accent: "#b59a56", brand: "#743b39" },
   },
@@ -111,8 +115,8 @@ export const templates: {
   {
     id: "vip",
     name: "宜爱家店铺",
-    tag: "商品大图 · 清晰卖点",
-    description: "米白与暖木色场景，短标题分层讲清卖点",
+    tag: "实拍大图 · 无底色文案",
+    description: "暖日光实拍铺满画面，黑色短标题右侧对齐",
     bg: "#f6f0e5",
     ink: "#302923",
     accent: "#763e40",
@@ -122,7 +126,7 @@ export const templates: {
     id: "warm",
     name: "温暖家居",
     tag: "生活感 · 柔和留白",
-    description: "适合素色被子、床品与柔软织物",
+    description: "柔和实拍配无底色短标题，适合素色床品",
     bg: "#f5f0e8",
     ink: "#443b34",
     accent: "#a7805e",
@@ -132,7 +136,7 @@ export const templates: {
     id: "clean",
     name: "简洁实拍",
     tag: "清晰 · 大图展示",
-    description: "突出商品实拍，信息轻盈有序",
+    description: "突出商品实拍，黑色标题直接落在照片留白处",
     bg: "#ffffff",
     ink: "#202626",
     accent: "#64736c",
@@ -142,7 +146,7 @@ export const templates: {
     id: "editorial",
     name: "质感画册",
     tag: "层次 · 细节叙事",
-    description: "用深浅对比呈现纹理与工艺",
+    description: "大图近景呈现纹理与工艺，无底色文字保留层次",
     bg: "#e9e4dc",
     ink: "#262926",
     accent: "#747761",
@@ -483,6 +487,8 @@ export function updateProjectTemplate(p: Project, template: TemplateId): Project
       title: previous.title,
       subtitle: previous.subtitle,
       ...(previous.composition ? { composition: previous.composition } : {}),
+      ...(previous.textPosition ? { textPosition: previous.textPosition } : {}),
+      ...(previous.textColor ? { textColor: previous.textColor } : {}),
       ...(original ? {
         imageId: original.id,
         sourceImageId: original.id,

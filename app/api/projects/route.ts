@@ -37,6 +37,8 @@ const module = z.object({
   layout: z.number().int().min(0).max(11),
   section: z.enum(["hero", "benefits", "texture", "filling", "pattern", "components", "craft", "scene", "colors", "specs", "care"]).optional(),
   composition: z.enum(["auto", "immersive", "split", "minimal"]).optional(),
+  textPosition: z.enum(["auto", "top-right", "top-left", "bottom-right", "bottom-left"]).optional(),
+  textColor: z.enum(["auto", "dark", "light"]).optional(),
   sourceImageId: z.string().max(80).optional(),
   sourceImageId2: z.string().max(80).optional(),
   aiStatus: z.enum(["pending", "succeeded", "failed"]).optional(),
