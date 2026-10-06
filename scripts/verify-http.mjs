@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:net";
+import { appBasePath, appPath } from "../lib/app-path.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const temporaryRoot = await realpath(tmpdir());
@@ -48,7 +49,7 @@ async function start() {
   for (let attempt = 0; attempt < 200; attempt++) {
     if (spawnError || server.exitCode !== null) throw new Error("production server failed to start");
     try {
-      const response = await fetch(`${origin}/api/health`, { signal: AbortSignal.timeout(500) });
+      const response = await fetch(`${origin}${appPath("/api/health")}`, { signal: AbortSignal.timeout(500) });
       if (response.ok) return;
     } catch {}
     await pause(100);
@@ -65,7 +66,7 @@ async function stop() {
   });
 }
 async function request(url, { cookie, body, method = "GET", headers = {} } = {}) {
-  return fetch(`${origin}${url}`, {
+  return fetch(`${origin}${appPath(url)}`, {
     method, redirect: "manual", signal: AbortSignal.timeout(10000),
     headers: { ...(method === "GET" ? {} : { Origin: origin }), ...(cookie ? { Cookie: cookie } : {}), ...headers },
     ...(body === undefined ? {} : { body }),
@@ -80,6 +81,7 @@ async function login(email) {
   const cookie = response.headers.get("set-cookie");
   assert.match(cookie, /HttpOnly/i);
   assert.match(cookie, /SameSite=Lax/i);
+  assert.ok(cookie.includes(`Path=${appBasePath() || "/"};`), "session cookie must be scoped to this application");
   return cookie.split(";")[0];
 }
 async function assertNoUpstreamRequests() {
@@ -112,7 +114,7 @@ globalThis.fetch = async () => {
 
   let response = await request("/");
   assert.equal(response.status, 307);
-  assert.equal(response.headers.get("location"), "/login");
+  assert.equal(response.headers.get("location"), appPath("/login"));
   assert.equal((await request("/api/projects", { headers: { "oai-authenticated-user-id": "forged-platform-user" } })).status, 401);
   assert.equal((await jsonPost("/api/generate-copy", {})).status, 401);
   pass("匿名访问受限且不信任旧平台身份请求头");
@@ -141,10 +143,12 @@ globalThis.fetch = async () => {
   const workbenchHtml = await response.text();
   assert.match(workbenchHtml, /<title>织境 · 家纺设计工作台<\/title>/);
   assert.match(workbenchHtml, /<div\s+id=["']app["']/);
-  const vueModule = workbenchHtml.match(/<script\b(?=[^>]*\btype=["']module["'])[^>]*\bsrc=["'](\/workbench\/assets\/[^"']+\.js)["']/i);
-  const vueStylesheet = workbenchHtml.match(/\bhref=["'](\/workbench\/assets\/[^"']+\.css)["']/i);
+  const vueModule = workbenchHtml.match(/<script\b(?=[^>]*\btype=["']module["'])[^>]*\bsrc=["']((?:\/[A-Za-z0-9_-]+)*\/workbench\/assets\/[^"']+\.js)["']/i);
+  const vueStylesheet = workbenchHtml.match(/\bhref=["']((?:\/[A-Za-z0-9_-]+)*\/workbench\/assets\/[^"']+\.css)["']/i);
   assert.ok(vueModule, "workbench must reference the built Vue module");
   assert.ok(vueStylesheet, "workbench must reference the built Vue stylesheet");
+  assert.ok(vueModule[1].startsWith(appPath("/workbench/assets/")), "Vue module must use the deployment prefix");
+  assert.ok(vueStylesheet[1].startsWith(appPath("/workbench/assets/")), "Vue stylesheet must use the deployment prefix");
   const vueModuleResponse = await request(vueModule[1], { cookie: firstCookie });
   assert.equal(vueModuleResponse.status, 200);
   assert.match(vueModuleResponse.headers.get("content-type"), /(?:java|ecma)script/i);
@@ -360,7 +364,7 @@ globalThis.fetch = async () => {
   pass("退出后旧会话失效");
 
   await assertNoUpstreamRequests();
-  console.log(JSON.stringify({ checkedAt: new Date().toISOString(), runtime: process.version, platform: process.platform, checks, realImageApiCalled: false }, null, 2));
+  console.log(JSON.stringify({ checkedAt: new Date().toISOString(), appBasePath: appBasePath(), runtime: process.version, platform: process.platform, checks, realImageApiCalled: false }, null, 2));
 } finally {
   await stop();
   await removeTemporaryDirectory();

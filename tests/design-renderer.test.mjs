@@ -6,7 +6,8 @@ import { sampleProject } from "../lib/design-model.ts";
 
 // Exercise actual drawing commands; browser proofs cover the real rounded font.
 const source = (await readFile(new URL("../lib/design-renderer.ts", import.meta.url), "utf8"))
-  .replace('"./design-model"', JSON.stringify(new URL("../lib/design-model.ts", import.meta.url).href));
+  .replace('"./design-model"', JSON.stringify(new URL("../lib/design-model.ts", import.meta.url).href))
+  .replace('"./app-path"', JSON.stringify(new URL("../lib/app-path.ts", import.meta.url).href));
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
 });

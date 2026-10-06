@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { ArrowRight, Eye, EyeOff, LoaderCircle } from "lucide-react";
 import styles from "./login.module.css";
+import { appPath } from "../../lib/app-path";
 
 export default function LoginForm() {
   const [email, setEmail] = useState("");
@@ -19,7 +20,7 @@ export default function LoginForm() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
-      const response = await fetch("/api/auth/login", {
+      const response = await fetch(appPath("/api/auth/login"), {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
@@ -38,7 +39,7 @@ export default function LoginForm() {
         return;
       }
       setPassword("");
-      window.location.assign("/");
+      window.location.assign(appPath("/"));
     } catch {
       setError("暂时无法连接工作台，请检查网络后重试。");
     } finally {

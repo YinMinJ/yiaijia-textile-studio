@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { appPath } from '../../lib/app-path';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Check, CircleHelp, FlaskConical, KeyRound, LoaderCircle, PlugZap, Save, ShieldCheck } from "@lucide/vue";
 import type { ImageQuality, ImageResolution } from "../../lib/model-connection";
@@ -92,7 +93,7 @@ async function loadConfiguration() {
   loading.value = true;
   error.value = "";
   try {
-    const response = await fetch("/api/model-settings", { signal: controller.signal });
+    const response = await fetch(appPath("/api/model-settings"), { signal: controller.signal });
     const data = await responseJSON<Configuration & { error?: string }>(response);
     if (!response.ok) throw new Error(data.error || "读取模型配置失败");
     configured.value = data.configured;
@@ -123,7 +124,7 @@ async function save(): Promise<boolean> {
   }
   setBusy("正在加密保存配置…");
   try {
-    const response = await fetch("/api/model-settings", {
+    const response = await fetch(appPath("/api/model-settings"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal: controller.signal,
@@ -162,7 +163,7 @@ async function checkConnection() {
   if (!(await save())) return;
   setBusy("正在检测接口和模型列表…");
   try {
-    const response = await fetch("/api/model-settings/test", { method: "POST", signal: controller.signal });
+    const response = await fetch(appPath("/api/model-settings/test"), { method: "POST", signal: controller.signal });
     const data = await responseJSON<{ message?: string; error?: string }>(response);
     if (!response.ok) throw new Error(data.error || "连接检测失败");
     connectionMessage.value = data.message || "连接检测完成";
@@ -177,12 +178,12 @@ async function testSingleImage() {
   if (!(await save())) return;
   setBusy("正在试生成 1 张图片，请保持页面打开…");
   try {
-    const source = await fetch("/samples/00224.jpg", { signal: controller.signal });
+    const source = await fetch(appPath("/samples/00224.jpg"), { signal: controller.signal });
     if (!source.ok) throw new Error("测试素材读取失败");
     const form = new FormData();
     form.append("image", await source.blob(), "sample-quilt.jpg");
     form.set("test", "true");
-    const response = await fetch("/api/generate-image", {
+    const response = await fetch(appPath("/api/generate-image"), {
       method: "POST",
       body: form,
       signal: controller.signal,
@@ -232,7 +233,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-if="loading" class="settings-feedback" role="status"><LoaderCircle :size="16" class="spin" />正在读取已保存配置…</div>
-        <a v-if="!signedIn" class="button secondary" href="/login" target="_top">登录后配置 API</a>
+        <a v-if="!signedIn" class="button secondary" :href="appPath('/login')" target="_top">登录后配置 API</a>
 
         <label class="settings-field">
           <span>API Base URL</span>
@@ -295,7 +296,7 @@ onBeforeUnmount(() => {
           <div><h3>试试看商品还原效果</h3><p>使用内置被子实拍生成 1 张图片，可能产生服务商费用。</p></div>
           <button type="button" class="button secondary" :disabled="locked || !imageModel || !baseUrl" @click="testSingleImage"><FlaskConical :size="16" />生成 1 张测试图</button>
         </div>
-        <figure v-if="testImage" class="test-result"><img :src="testImage" alt="API 实际返回的被子试生成结果" /><figcaption>真实接口返回结果 · 检查材质、颜色与商品形态</figcaption></figure>
+        <figure v-if="testImage" class="test-result"><img :src="appPath(testImage)" alt="API 实际返回的被子试生成结果" /><figcaption>真实接口返回结果 · 检查材质、颜色与商品形态</figcaption></figure>
       </form>
 
       <aside class="settings-guide">

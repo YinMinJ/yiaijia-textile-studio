@@ -185,8 +185,10 @@ test("bootstrap requires explicit credentials, is atomic, and never changes an e
 
 test("APP_URL is the only trusted origin and public deployments require HTTPS", () => {
   const original = process.env.APP_URL;
+  const originalPrefix = process.env.NEXT_PUBLIC_APP_BASE_PATH;
   try {
     delete process.env.APP_URL;
+    delete process.env.NEXT_PUBLIC_APP_BASE_PATH;
     assert.equal(getAppUrl().origin, "http://localhost:3000");
     assert.equal(sessionCookieOptions().secure, false);
     for (const invalid of ["https://example.com/path", "https://a:b@example.com", "ftp://example.com", "http://example.com", "not a url"]) {
@@ -200,6 +202,10 @@ test("APP_URL is the only trusted origin and public deployments require HTTPS", 
     assert.equal(cookie.path, "/");
     assert.equal(cookie.maxAge, SESSION_MAX_AGE_SECONDS);
     assert.equal("domain" in cookie, false);
+    process.env.NEXT_PUBLIC_APP_BASE_PATH = "/zhijing";
+    assert.equal(sessionCookieOptions().path, "/zhijing");
+    assert.equal(sessionCookieOptions().secure, true);
+    assert.equal(sessionCookieOptions().httpOnly, true);
     assert.equal(isSameOriginRequest(new Request("http://internal:3000/api/auth/login", { headers: { Origin: "https://studio.example.com" } })), true);
     for (const origin of [undefined, "null", "https://attacker.example", "http://studio.example.com", "https://studio.example.com:444", "https://studio.example.com/"]) {
       const headers = new Headers({ Host: "studio.example.com", "X-Forwarded-Host": "studio.example.com" });
@@ -209,6 +215,8 @@ test("APP_URL is the only trusted origin and public deployments require HTTPS", 
   } finally {
     if (original === undefined) delete process.env.APP_URL;
     else process.env.APP_URL = original;
+    if (originalPrefix === undefined) delete process.env.NEXT_PUBLIC_APP_BASE_PATH;
+    else process.env.NEXT_PUBLIC_APP_BASE_PATH = originalPrefix;
   }
 });
 

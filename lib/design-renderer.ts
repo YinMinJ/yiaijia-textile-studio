@@ -5,6 +5,7 @@ import {
   type Project,
   type DesignModule,
 } from "./design-model";
+import { appPath } from "./app-path";
 const pictures = new Map<string, Promise<HTMLImageElement>>();
 function picture(url: string) {
   if (!pictures.has(url))
@@ -17,7 +18,7 @@ function picture(url: string) {
           pictures.delete(url);
           reject(new Error("图片暂时无法读取，请重新选择素材。"));
         };
-        image.src = url;
+        image.src = appPath(url);
       }),
     );
   return pictures.get(url)!;

@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { getSqlite } from "./database.ts";
+import { appBasePath } from "./app-path.ts";
 
 export type AuthUser = { id: string; email: string; displayName: string };
 export type CreateAccountInput = { email: string; password: string; displayName?: string };
@@ -324,7 +325,7 @@ export function sessionCookieOptions() {
     httpOnly: true,
     sameSite: "lax" as const,
     secure: getAppUrl().protocol === "https:",
-    path: "/",
+    path: appBasePath() || "/",
     maxAge: SESSION_MAX_AGE_SECONDS,
   };
 }

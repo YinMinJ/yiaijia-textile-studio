@@ -1,3 +1,5 @@
+import { appPath } from '../lib/app-path';
+import { appLocalMode } from '../lib/app-mode';
 import { ref, shallowRef, computed, onMounted, onBeforeUnmount, type Ref } from 'vue';
 import { zip, unzip, strToU8 } from 'fflate';
 import { buildCopyInput, applyGeneratedCopy, preserveHeroCopy, type GeneratedCopy } from '../lib/design-copy';
@@ -13,10 +15,12 @@ async function zipFiles(files:Record<string,Uint8Array>) { return new Promise<Ui
 
 export function useStudio() {
   const signedIn = true;
+  const localMode = appLocalMode();
   const view=ref<View>('home'), step=ref<Step>('materials'), outputTab=ref('main');
   const project=shallowRef<Project|null>(null), projects=shallowRef<Project[]>([]);
   const busy=ref(''), progress=ref(0), dirty=ref(false), historyError=ref(''), historyLoading=ref(true);
   const editingId=ref<string|null>(null), pendingSwitch=shallowRef<(()=>void)|null>(null);
+  const pendingIntent=ref<'switch'|'logout'>('switch');
   const newOpen=ref(false), newName=ref(''), newOutput=ref<'main'|'detail'>('main'), newCategory=ref<ProductCategory>('quilt'), newBrief=ref('');
   const modelConfigured=ref(false), generationRunning=ref(false), copyBusy=ref(false), helpOpen=ref(false);
   const copyResult=shallowRef<CopyResult|null>(null), lastDownload=ref<{url:string;name:string}|null>(null);
@@ -35,11 +39,11 @@ export function useStudio() {
 
   async function loadProjects() {
     historyLoading.value=true;
-    try {const response=await fetch('/api/projects');const data=await response.json();if(!response.ok)throw new Error(data.error||'作品读取失败');projects.value=data.projects;historyError.value='';}
+    try {const response=await fetch(appPath('/api/projects'));const data=await response.json();if(!response.ok)throw new Error(data.error||'作品读取失败');projects.value=data.projects;historyError.value='';}
     catch(e){historyError.value=(e as Error).message;}finally{historyLoading.value=false;}
   }
   function warn(e:BeforeUnloadEvent) {if(dirty.value){e.preventDefault();e.returnValue='';}}
-  onMounted(()=>{void loadProjects();void fetch('/api/model-settings').then(r=>r.json()).then(d=>modelConfigured.value=!!d.configured).catch(()=>{});window.addEventListener('beforeunload',warn);});
+  onMounted(()=>{void loadProjects();void fetch(appPath('/api/model-settings')).then(r=>r.json()).then(d=>modelConfigured.value=!!d.configured).catch(()=>{});window.addEventListener('beforeunload',warn);});
   onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warn);clearTimeout(noticeTimer);if(lastDownload.value)URL.revokeObjectURL(lastDownload.value.url);});
 
 async function unpack(files: File[]) {
@@ -108,15 +112,37 @@ function patchProject(p: Project) {
     setProject(p);
     setDirty(true);
 }
-function requestProjectSwitch(action: () => void) {
+function requestProjectSwitch(action: () => void, intent: 'switch' | 'logout' = 'switch') {
     if (busy.value || generationRunning.value || copyBusy.value) {
-        toast.info("当前任务正在处理中，完成后即可切换商品。");
+        toast.info(intent === 'logout' ? "当前任务正在处理中，完成后即可退出登录。" : "当前任务正在处理中，完成后即可切换商品。");
         return;
     }
+    pendingIntent.value = intent;
     if (project.value && dirty.value)
         setPendingSwitch(() => action);
     else
         action();
+}
+function requestLogout() {
+    if (!localMode) requestProjectSwitch(() => { void logout(); }, 'logout');
+}
+async function logout() {
+    setBusy("正在退出登录");
+    try {
+        const response = await fetch(appPath('/api/auth/logout'), {
+            method: 'POST',
+            credentials: 'same-origin',
+            signal: AbortSignal.timeout(15000),
+        });
+        if (!response.ok) throw new Error("暂时无法退出登录，请重试。当前修改仍保留。");
+        // The existing save/discard dialog has already resolved unsaved changes.
+        setDirty(false);
+        window.location.assign(appPath('/login'));
+    } catch {
+        toast.error("暂时无法退出登录，请重试。当前修改仍保留。");
+    } finally {
+        setBusy("");
+    }
 }
 function openProject(p: Project) {
     if (project.value?.id === p.id) {
@@ -163,7 +189,7 @@ async function generateCopy() {
     setBusy("大模型正在编写其他图片的文案 · 首图文案由你填写");
     try {
         const request = buildCopyInput(original);
-        const response = await fetch("/api/generate-copy", {
+        const response = await fetch(appPath("/api/generate-copy"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(request),
@@ -244,7 +270,7 @@ async function save(p = project.value) {
             id: p.sample ? crypto.randomUUID() : p.id,
             sample: undefined,
         };
-        const r = await fetch("/api/projects", {
+        const r = await fetch(appPath("/api/projects"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(value),
@@ -326,7 +352,7 @@ async function importFiles(files: File[]) {
                 const prepared = await prepareImage(file);
                 const form = new FormData();
                 form.set("file", prepared.file);
-                const r = await fetch("/api/assets", { method: "POST", body: form });
+                const r = await fetch(appPath("/api/assets"), { method: "POST", body: form });
                 const data = (await r.json()) as {
                     error?: string;
                     projects: Project[];
@@ -372,7 +398,7 @@ async function persist(p: Project) {
         id: p.sample ? crypto.randomUUID() : p.id,
         sample: undefined,
     };
-    const r = await fetch("/api/projects", {
+    const r = await fetch(appPath("/api/projects"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(value),
@@ -424,7 +450,7 @@ async function runAI(initial: Project, onlyId?: string) {
                 const references = referenceAssets(p, target).slice(0, 3);
                 let totalBytes = 0;
                 for (const [referenceIndex, reference] of references.entries()) {
-                    const source = await fetch(reference.url);
+                    const source = await fetch(appPath(reference.url));
                     if (!source.ok)
                         throw new Error("第" + (referenceIndex + 1) + "张商品参考素材读取失败。");
                     const blob = await source.blob();
@@ -440,7 +466,7 @@ async function runAI(initial: Project, onlyId?: string) {
                 form.set("moduleId", target.id);
                 if (onlyId)
                     form.set("retry", "true");
-                const r = await fetch("/api/generate-image", {
+                const r = await fetch(appPath("/api/generate-image"), {
                     method: "POST",
                     body: form,
                 });
@@ -722,7 +748,7 @@ async function downloadAll() {
   const activeModule=computed(()=>project.value?.modules.find(m=>m.id===editingId.value));
   const isAiIncomplete=computed(()=>project.value?.generation==='ai'&&project.value.modules.some(m=>needsAI(project.value!,m)&&m.aiStatus!=='succeeded'));
   const canExport=computed(()=>!!project.value&&project.value.workflow!=='plan'&&project.value.workflow!=='preview'&&project.value.modules.length===(project.value.output==='main'?5:project.value.output==='detail'?7:12)&&!isAiIncomplete.value);
-  return {view,step,outputTab,project,projects,busy,progress,dirty,historyError,historyLoading,editingId,pendingSwitch,newOpen,newName,newOutput,newCategory,modelConfigured,copyBusy,copyResult,lastDownload,helpOpen,notice,activeModule,isAiIncomplete,canExport,
-    notify,loadProjects,patchProject,requestProjectSwitch,openProject,startCreation,finishProjectSwitch,generateCopy,undoCopy,openSample,navigate,save,createProject,updateInfo,importFiles,runAI,preparePlan,changeCategory,previewPlan,completePlan,selectTemplate,useLibraryTemplate,removeProjectAsset,updateModule,downloadOne,downloadAll,updatePlan,moveModule};
+  return {view,step,outputTab,project,projects,busy,progress,dirty,historyError,historyLoading,editingId,pendingSwitch,pendingIntent,localMode,newOpen,newName,newOutput,newCategory,modelConfigured,copyBusy,copyResult,lastDownload,helpOpen,notice,activeModule,isAiIncomplete,canExport,
+    notify,loadProjects,patchProject,requestProjectSwitch,requestLogout,openProject,startCreation,finishProjectSwitch,generateCopy,undoCopy,openSample,navigate,save,createProject,updateInfo,importFiles,runAI,preparePlan,changeCategory,previewPlan,completePlan,selectTemplate,useLibraryTemplate,removeProjectAsset,updateModule,downloadOne,downloadAll,updatePlan,moveModule};
 }
 export type StudioContext=ReturnType<typeof useStudio>;

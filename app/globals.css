@@ -3,21 +3,21 @@
 @import "../vendor/shadcn-tailwind-4.13.0.css";
 @font-face {
   font-family: TextileSans;
-  src: url("/fonts/ResourceHanRoundedCN-Regular.woff2") format("woff2");
+  src: url("../public/fonts/ResourceHanRoundedCN-Regular.woff2") format("woff2");
   font-display: swap;
   font-weight: 400;
   font-style: normal;
 }
 @font-face {
   font-family: TextileSans;
-  src: url("/fonts/ResourceHanRoundedCN-Medium.woff2") format("woff2");
+  src: url("../public/fonts/ResourceHanRoundedCN-Medium.woff2") format("woff2");
   font-display: swap;
   font-weight: 500;
   font-style: normal;
 }
 @font-face {
   font-family: TextileSans;
-  src: url("/fonts/ResourceHanRoundedCN-Bold.woff2") format("woff2");
+  src: url("../public/fonts/ResourceHanRoundedCN-Bold.woff2") format("woff2");
   font-display: swap;
   font-weight: 700;
   font-style: normal;

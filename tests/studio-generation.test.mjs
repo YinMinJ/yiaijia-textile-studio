@@ -4,18 +4,25 @@ import { readFile } from "node:fs/promises";
 import ts from "typescript";
 import * as model from "../lib/design-model.ts";
 import * as copy from "../lib/design-copy.ts";
+import { appPath } from "../lib/app-path.ts";
+import { appLocalMode } from "../lib/app-mode.ts";
 
+const originalBasePath = process.env.NEXT_PUBLIC_APP_BASE_PATH;
+test.after(() => {
+  if (originalBasePath === undefined) delete process.env.NEXT_PUBLIC_APP_BASE_PATH;
+  else process.env.NEXT_PUBLIC_APP_BASE_PATH = originalBasePath;
+});
 const state = { requests: [], oversizedUrl: "", missingUrl: "", sourceBytes: new Uint8Array([1, 2, 3]) };
 globalThis.__studioGenerationTest = {
-  ...model, ...copy,
+  ...model, ...copy, appPath, appLocalMode,
   ref: value => ({ value }), shallowRef: value => ({ value }),
   computed: getter => ({ get value() { return getter(); } }),
   onMounted: () => {}, onBeforeUnmount: () => {},
   setTimeout: () => 0, clearTimeout: () => {},
   fetch: async (url, request = {}) => {
     state.requests.push({ url, request });
-    if (url === "/api/projects") return Response.json({ project: JSON.parse(request.body) });
-    if (url === "/api/generate-image") return Response.json({
+    if (url === appPath("/api/projects")) return Response.json({ project: JSON.parse(request.body) });
+    if (url === appPath("/api/generate-image")) return Response.json({
       asset: { id: "generated-test-image", name: "generated product", generated: true, url: "/api/assets/generated-test-image", role: "整体", width: 1024, height: 1024 },
     });
     if (url === state.missingUrl) return new Response("missing", { status: 404 });
@@ -30,7 +37,8 @@ const { outputText } = ts.transpileModule(
 );
 const { useStudio } = await import("data:text/javascript;base64," + Buffer.from(outputText).toString("base64"));
 
-function setup({ knownColor = true } = {}) {
+function setup({ knownColor = true, basePath = "" } = {}) {
+  process.env.NEXT_PUBLIC_APP_BASE_PATH = basePath;
   state.requests = [];
   state.oversizedUrl = "";
   state.missingUrl = "";
@@ -136,4 +144,46 @@ test("Vue multiline copy, text position and color edits keep completed photos an
   assert.equal(saved.modules[0].textPosition, "bottom-left");
   assert.equal(saved.modules[0].textColor, "light");
   assert.equal(state.requests.filter(item => ["/api/generate-image", "/api/generate-copy"].includes(item.url)).length, 0);
+});
+
+test("Vue subpath generation prefixes reference, generation and persistence requests without changing stored asset URLs", async () => {
+  const { studio, project, hero } = setup({ basePath: "/zhijing" });
+  const originalUrls = project.assets.map(asset => asset.url);
+  await studio.runAI(project, hero.id);
+  assert.deepEqual(state.requests.map(item => item.url), [
+    "/zhijing/api/projects",
+    "/zhijing/api/assets/primary",
+    "/zhijing/api/assets/same-detail",
+    "/zhijing/api/assets/same-whole",
+    "/zhijing/api/generate-image",
+    "/zhijing/api/projects",
+  ]);
+  const generation = state.requests.find(item => item.url === "/zhijing/api/generate-image");
+  assert.equal(generation.request.body.getAll("image").length, 3);
+  assert.equal(generation.request.body.get("moduleId"), hero.id);
+  const persisted = state.requests.filter(item => item.url === "/zhijing/api/projects").map(item => JSON.parse(item.request.body));
+  assert.deepEqual(persisted[0].assets.map(asset => asset.url), originalUrls);
+  assert.deepEqual(persisted[1].assets.map(asset => asset.url), [...originalUrls, "/api/assets/generated-test-image"]);
+  assert.deepEqual(studio.project.value.assets.map(asset => asset.url), persisted[1].assets.map(asset => asset.url));
+  assert.equal(studio.project.value.modules[0].aiStatus, "succeeded");
+});
+
+test("Vue subpath manual edits save through the prefixed endpoint while preserving canonical original and generated asset URLs", async () => {
+  const { studio, project, hero } = setup({ basePath: "/zhijing" });
+  const generated = { ...project.assets[0], id: "saved-generated", url: "/api/assets/saved-generated", generated: true };
+  studio.project.value = {
+    ...project, sample: undefined, generation: "ai", assets: [...project.assets, generated],
+    modules: project.modules.map(module => module.id === hero.id ? { ...module, imageId: generated.id, aiStatus: "succeeded" } : module),
+  };
+  studio.editingId.value = hero.id;
+  studio.updateModule({ title: "全棉亲肤面料\n柔软顺滑", imageZoom: 1.2 });
+  const expectedUrls = studio.project.value.assets.map(asset => asset.url);
+  assert.equal(await studio.save(), true);
+  assert.deepEqual(state.requests.map(item => item.url), ["/zhijing/api/projects"]);
+  const saved = JSON.parse(state.requests[0].request.body);
+  assert.deepEqual(saved.assets.map(asset => asset.url), expectedUrls);
+  assert.equal(saved.modules[0].title, "全棉亲肤面料\n柔软顺滑");
+  assert.equal(saved.modules[0].imageZoom, 1.2);
+  assert.equal(saved.modules[0].imageId, generated.id);
+  assert.equal(saved.modules[0].aiStatus, "succeeded");
 });

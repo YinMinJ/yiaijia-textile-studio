@@ -1,0 +1,23 @@
+[Unit]
+Description=Zhijing textile design workbench
+After=network.target
+
+[Service]
+Type=simple
+User=zhijing
+Group=zhijing
+WorkingDirectory=/opt/zhijing/current
+EnvironmentFile=/etc/zhijing.env
+ExecStart=/opt/zhijing/runtime/bin/node /opt/zhijing/current/scripts/start-server.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/zhijing /var/lib/zhijing
+
+[Install]
+WantedBy=multi-user.target

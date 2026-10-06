@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { Layers3, LockKeyhole } from "lucide-react";
 import { getCurrentUser } from "../../lib/auth.ts";
+import { appPath } from "../../lib/app-path.ts";
 import LoginForm from "./login-form";
 import styles from "./login.module.css";
 
@@ -11,7 +12,7 @@ export const metadata: Metadata = { title: "登录 · 织境" };
 
 export default async function LoginPage() {
   const user = await getCurrentUser();
-  if (user) redirect("/");
+  if (user) redirect(appPath("/"));
 
   return (
     <main className={styles.shell}>

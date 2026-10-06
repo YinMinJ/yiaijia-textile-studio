@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { appLocalMode } from '../../lib/app-mode';
+import { appPath } from '../../lib/app-path';
 import { computed, ref } from 'vue';
 import { ArrowRight, ArrowUpRight, Check, Clock3, FileImage, FolderOpen, LayoutTemplate, LoaderCircle, Plus, RefreshCw, Sparkles } from '@lucide/vue';
 import { categoryFor, moduleSection, needsAI, type Project } from '../../lib/design-model';
 
+const localMode = appLocalMode();
 const props = defineProps<{
   projects: Project[];
   currentProject: Project | null;
@@ -55,7 +58,7 @@ function date(value: string) {
   <div class="studio-home">
     <header class="page-heading">
       <div><span class="eyebrow">YOUR CREATIVE SPACE</span><h1>把商品，做成好作品。</h1><p>从一张实拍开始，让主图和详情都更有说服力。</p></div>
-      <span class="workspace-label"><i /> 本地工作空间</span>
+      <span class="workspace-label"><i /> {{ localMode ? '本地工作空间' : '服务器工作空间' }}</span>
     </header>
 
     <section class="creative-banner" aria-labelledby="creative-title">
@@ -66,7 +69,7 @@ function date(value: string) {
         <button class="primary-button" :disabled="busy" @click="emit('create', 'main')"><Plus :size="17" /> 开始新作品 <ArrowRight :size="17" /></button>
         <span class="banner-foot"><Check :size="13" /> 首图文案由你决定 · 其余文案 AI 辅助</span>
       </div>
-      <div class="banner-visual"><img src="/samples/00224.jpg" alt="米白色绗缝被的真实家居场景" /><span class="photo-label">SOFT TEXTURE <span>触得到的温柔</span></span></div>
+      <div class="banner-visual"><img :src="appPath('/samples/00224.jpg')" alt="米白色绗缝被的真实家居场景" /><span class="photo-label">SOFT TEXTURE <span>触得到的温柔</span></span></div>
     </section>
 
     <form class="brief-composer" @submit.prevent="createFromBrief">
@@ -85,16 +88,16 @@ function date(value: string) {
     </section>
 
     <section v-if="currentProject" class="resume-card" aria-label="继续当前作品">
-      <div class="resume-cover"><img v-if="cover(currentProject)" :src="cover(currentProject)!.url" alt="当前作品的商品素材" /><FileImage v-else :size="24" /></div>
+      <div class="resume-cover"><img v-if="cover(currentProject)" :src="appPath(cover(currentProject)!.url)" alt="当前作品的商品素材" /><FileImage v-else :size="24" /></div>
       <div class="resume-copy"><span>当前作品 <i /> <em :class="{ unsaved: dirty }">{{ currentSave }}</em></span><h2>{{ currentProject.info.name || '未命名商品' }}</h2><p>{{ categoryFor(currentProject).name }} · {{ status(currentProject) }}</p></div>
       <button class="secondary-button" :disabled="busy" @click="emit('resume')">继续编辑 <ArrowRight :size="16" /></button>
     </section>
 
     <section class="section" aria-labelledby="recent-title">
       <div class="section-heading"><div><h2 id="recent-title">最近作品</h2><p>保存你的进度，灵感随时接着做。</p></div><button class="text-button" @click="emit('allWorks')">查看全部 <ArrowRight :size="15" /></button></div>
-      <div v-if="historyLoading" class="state-panel" role="status"><LoaderCircle class="spin" :size="23" /><span>正在读取本地作品…</span></div>
+      <div v-if="historyLoading" class="state-panel" role="status"><LoaderCircle class="spin" :size="23" /><span>{{ localMode ? '正在读取本地作品…' : '正在读取服务器作品…' }}</span></div>
       <div v-else-if="historyError" class="state-panel error" role="alert"><FolderOpen :size="24" /><div><strong>作品暂时无法加载</strong><p>{{ historyError }}</p></div><button class="secondary-button" :disabled="busy" @click="emit('retry')"><RefreshCw :size="15" /> 重试</button></div>
-      <div v-else-if="recent.length" class="works-grid"><button v-for="project in recent" :key="project.id" class="work-card" :disabled="busy" @click="emit('open', project)"><span class="work-art"><img v-if="cover(project)" :src="cover(project)!.url" :alt="project.info.name || '商品素材'" /><FileImage v-else :size="30" /><span class="work-kind">{{ outputName(project) }}</span><span class="work-arrow"><ArrowUpRight :size="18" /></span></span><span class="work-info"><strong>{{ project.info.name || '未命名商品' }}</strong><span>{{ categoryFor(project).name }} · {{ status(project) }}</span><small><Clock3 :size="12" /> {{ date(project.updatedAt) }}保存</small></span></button></div>
+      <div v-else-if="recent.length" class="works-grid"><button v-for="project in recent" :key="project.id" class="work-card" :disabled="busy" @click="emit('open', project)"><span class="work-art"><img v-if="cover(project)" :src="appPath(cover(project)!.url)" :alt="project.info.name || '商品素材'" /><FileImage v-else :size="30" /><span class="work-kind">{{ outputName(project) }}</span><span class="work-arrow"><ArrowUpRight :size="18" /></span></span><span class="work-info"><strong>{{ project.info.name || '未命名商品' }}</strong><span>{{ categoryFor(project).name }} · {{ status(project) }}</span><small><Clock3 :size="12" /> {{ date(project.updatedAt) }}保存</small></span></button></div>
       <div v-else class="state-panel"><span class="empty-icon"><FolderOpen :size="25" /></span><div><strong>让第一件作品，在这里发生</strong><p>上传商品实拍开始制作，保存后即可随时继续。</p></div><button class="secondary-button" :disabled="busy" @click="emit('create', 'main')"><Plus :size="15" /> 新建作品</button></div>
     </section>
 

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getCurrentUser } from "@/lib/auth";
+import { appPath } from "@/lib/app-path";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,7 +9,7 @@ export const dynamic = "force-dynamic";
 /** Vue owns the workbench UI; Next keeps the authenticated API and local storage. */
 export async function GET() {
   const user = await getCurrentUser();
-  if (!user) return new Response(null, { status: 307, headers: { Location: "/login", "Cache-Control": "no-store" } });
+  if (!user) return new Response(null, { status: 307, headers: { Location: appPath("/login"), "Cache-Control": "no-store" } });
 
   try {
     const html = await readFile(path.join(process.cwd(), "public", "workbench", "index.html"), "utf8");

@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
+import { appPath } from "../lib/app-path";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "织境 · 家纺设计工作台",
   description: "上传商品实拍，制作5张主图与790宽详情切片。",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: appPath("/favicon.svg"),
+    shortcut: appPath("/favicon.svg"),
   },
 };
 
