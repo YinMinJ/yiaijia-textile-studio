@@ -40,6 +40,13 @@ const publicFiles = [
   "fonts/ResourceHanRoundedCN-Bold.woff2",
   "fonts/ResourceHanRounded-LICENSE.txt",
   "fonts/ResourceHanRounded-NOTICE.txt",
+  "fonts/NotoSansSC-Variable.woff2",
+  "fonts/NotoSansSC-LICENSE.txt",
+  "fonts/NotoSerifSC-Variable.woff2",
+  "fonts/NotoSerifSC-LICENSE.txt",
+  "fonts/TextileKai-Regular.woff2",
+  "fonts/TextileKai-LICENSE.txt",
+  "fonts/TextileCopyFonts-NOTICE.txt",
   ...["00224", "00225", "00229", "00233", "00237", "00240", "00246", "00265-edge"].map(name => `samples/${name}.jpg`),
 ];
 

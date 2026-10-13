@@ -159,7 +159,7 @@ globalThis.fetch = async () => {
   const vueCss = await vueStylesheetResponse.text();
   assert.ok(vueCss.length > 0, "Vue stylesheet must not be empty");
   const fontUrls = [...new Set([...vueCss.matchAll(/url\(\s*["']?([^"'()\s]+\.woff2(?:\?[^"'()\s]*)?)["']?\s*\)/gi)].map((match) => match[1]))];
-  assert.equal(fontUrls.length, 3, "Vue stylesheet must include all three rounded font weights");
+  assert.ok(fontUrls.length >= 6, "Vue stylesheet must include the three rounded font weights and all three additional font families");
   for (const fontUrl of fontUrls) {
     const fontAddress = new URL(fontUrl, new URL(vueStylesheet[1], origin));
     assert.equal(fontAddress.origin, origin, "rounded fonts must load from this app");
@@ -170,7 +170,7 @@ globalThis.fetch = async () => {
     assert.ok(fontBytes.length > 4, "rounded font must not be empty");
     assert.equal(fontBytes.subarray(0, 4).toString("ascii"), "wOF2", "font response must contain actual WOFF2 bytes");
   }
-  pass("登录后的真实 Vue 工作台 HTML、模块脚本、CSS 与三种圆体字体均可访问且入口禁止缓存");
+  pass("登录后的真实 Vue 工作台 HTML、模块脚本、CSS 与全部内置字体均可访问且入口禁止缓存");
 
   const bytes = await readFile(path.join(root, "public", "samples", "00224.jpg"));
   const form = new FormData();
@@ -184,6 +184,60 @@ globalThis.fetch = async () => {
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
   assert.equal((await request(asset.url, { cookie: secondCookie })).status, 404);
   pass("图片上传读取字节一致、禁止共享缓存、账户间素材隔离");
+
+  const fontBytes = await readFile(path.join(root, "public", "fonts", "ResourceHanRoundedCN-Regular.woff2"));
+  const fontForm = () => {
+    const data = new FormData();
+    data.append("file", new Blob([fontBytes], { type: "application/octet-stream" }), "自定义验收圆体.woff2");
+    return data;
+  };
+  assert.equal((await request("/api/fonts")).status, 401);
+  assert.equal((await request("/api/fonts", { method: "POST", body: fontForm() })).status, 401);
+  assert.equal((await request("/api/fonts", { method: "POST", cookie: firstCookie, body: fontForm(), headers: { Origin: "https://unrelated.example" } })).status, 403);
+  response = await request("/api/fonts", { method: "POST", cookie: firstCookie, body: fontForm() });
+  assert.equal(response.status, 200);
+  const uploadedFont = (await response.json()).font;
+  assert.equal(uploadedFont.name, "自定义验收圆体");
+  assert.match(uploadedFont.id, /^[0-9a-f-]{36}$/);
+  assert.equal(uploadedFont.url, "/api/fonts/" + uploadedFont.id);
+  response = await request(uploadedFont.url, { cookie: firstCookie });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "font/woff2");
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), fontBytes);
+  assert.equal((await request(uploadedFont.url, { cookie: secondCookie })).status, 404);
+  assert.equal((await request(uploadedFont.url)).status, 401);
+  response = await request("/api/fonts", { cookie: firstCookie });
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual((await response.json()).fonts, [uploadedFont]);
+  assert.deepEqual((await (await request("/api/fonts", { cookie: secondCookie })).json()).fonts, []);
+  const fakeFont = new FormData();
+  fakeFont.append("file", new Blob(["<html>not a font</html>"], { type: "font/ttf" }), "renamed.ttf");
+  assert.equal((await request("/api/fonts", { method: "POST", cookie: firstCookie, body: fakeFont })).status, 400);
+  const otherFont = (await (await request("/api/fonts", { method: "POST", cookie: secondCookie, body: fontForm() })).json()).font;
+  const fontFixtures = new DatabaseSync(path.join(directory, "app.sqlite"));
+  try {
+    const fontOwner = fontFixtures.prepare("SELECT owner_id FROM fonts WHERE id = ?").get(uploadedFont.id).owner_id;
+    assert.equal(fontFixtures.prepare("SELECT object_key FROM fonts WHERE id = ?").get(uploadedFont.id).object_key, `${fontOwner}/fonts/${uploadedFont.id}`);
+    const insert = fontFixtures.prepare("INSERT INTO fonts (id, owner_id, object_key, name, mime, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    const fixtureIds = Array.from({ length: 19 }, () => randomUUID());
+    for (const id of fixtureIds) insert.run(id, fontOwner, `${fontOwner}/fonts/${id}`, "quota fixture", "font/woff2", 1, new Date().toISOString());
+    assert.equal((await request("/api/fonts", { method: "POST", cookie: firstCookie, body: fontForm() })).status, 413);
+    fontFixtures.prepare("DELETE FROM fonts WHERE id = ?").run(fixtureIds[0]);
+    const concurrentUploads = await Promise.all([1, 2].map(() => request("/api/fonts", { method: "POST", cookie: firstCookie, body: fontForm() })));
+    assert.deepEqual(concurrentUploads.map(result => result.status).sort(), [200, 413], "concurrent uploads must share the account quota atomically");
+    const acceptedConcurrentFont = (await concurrentUploads.find(result => result.status === 200).json()).font;
+    assert.equal(fontFixtures.prepare("SELECT COUNT(*) AS count FROM fonts WHERE owner_id = ?").get(fontOwner).count, 20);
+    fontFixtures.prepare("DELETE FROM fonts WHERE id = ?").run(acceptedConcurrentFont.id);
+    for (const id of fixtureIds) fontFixtures.prepare("DELETE FROM fonts WHERE id = ?").run(id);
+    const spaceFixture = randomUUID();
+    insert.run(spaceFixture, fontOwner, `${fontOwner}/fonts/${spaceFixture}`, "quota fixture", "font/woff2", 100 * 1024 * 1024, new Date().toISOString());
+    assert.equal((await request("/api/fonts", { method: "POST", cookie: firstCookie, body: fontForm() })).status, 413);
+    fontFixtures.prepare("DELETE FROM fonts WHERE id = ?").run(spaceFixture);
+    assert.equal(fontFixtures.prepare("SELECT COUNT(*) AS count FROM fonts WHERE owner_id = ?").get(fontOwner).count, 1);
+  } finally { fontFixtures.close(); }
+  pass("自定义字体上传与字节读取、结构验证、同源与登录检查、账户隔离、独立存储、私有缓存及数量/空间配额");
 
   const project = {
     id: randomUUID(),
@@ -215,6 +269,21 @@ globalThis.fetch = async () => {
   assert.deepEqual((await (await request("/api/projects", { cookie: firstCookie })).json()).projects[0].modules[0], copyModule);
   await assertNoUpstreamRequests();
   pass("无底色文案位置、字色与手动换行保存回读、拒绝无效枚举且不调用上游");
+
+  for (const titleFont of ["rounded", "sans", "serif", "kai", `custom:${uploadedFont.id}`]) {
+    copyModule.titleFont = titleFont;
+    copyModule.subtitleFont = titleFont === "sans" ? "serif" : "sans";
+    assert.equal((await jsonPost("/api/projects", project, firstCookie)).status, 200);
+    assert.deepEqual((await (await request("/api/projects", { cookie: firstCookie })).json()).projects[0].modules[0], copyModule);
+  }
+  for (const invalid of ["system-ui", "custom:../other", `custom:${randomUUID()}`, `custom:${otherFont.id}`]) {
+    for (const field of ["titleFont", "subtitleFont"]) {
+      assert.equal((await jsonPost("/api/projects", { ...project, modules: [{ ...copyModule, [field]: invalid }] }, firstCookie)).status, 400);
+    }
+  }
+  assert.deepEqual((await (await request("/api/projects", { cookie: firstCookie })).json()).projects[0].modules[0], copyModule);
+  await assertNoUpstreamRequests();
+  pass("主标题与补充说明字体独立保存回读、内置字体与本人字体可用、拒绝未知和其他账户字体且不影响已保存作品");
 
   const customSettings = { baseUrl: "https://image-api.example.com/v1/images/edits", model: "custom-image-model", textModel: "custom-copy-model" };
   response = await jsonPost("/api/model-settings", { ...customSettings, apiKey: fakeKey }, firstCookie);
@@ -347,6 +416,7 @@ globalThis.fetch = async () => {
   assert.equal((await (await request("/api/projects", { cookie: firstCookie })).json()).projects[0].id, project.id);
   assert.deepEqual((await (await request("/api/projects", { cookie: firstCookie })).json()).projects[0].modules[0], copyModule);
   assert.equal((await request(asset.url, { cookie: firstCookie })).status, 200);
+  assert.deepEqual(Buffer.from(await (await request(uploadedFont.url, { cookie: firstCookie })).arrayBuffer()), fontBytes);
   assert.equal((await (await request("/api/model-settings", { cookie: firstCookie })).json()).keyHint, fakeKey.slice(-4));
   assert.equal((await (await request("/api/model-settings", { cookie: firstCookie })).json()).model, customSettings.model);
   assert.equal((await (await request("/api/model-settings", { cookie: firstCookie })).json()).textModel, customSettings.textModel);
@@ -360,6 +430,7 @@ globalThis.fetch = async () => {
   assert.equal((await request("/api/auth/logout", { method: "POST", cookie: firstCookie })).status, 200);
   assert.equal((await request("/api/projects", { cookie: firstCookie })).status, 401);
   assert.equal((await request(asset.url, { cookie: firstCookie })).status, 401);
+  assert.equal((await request(uploadedFont.url, { cookie: firstCookie })).status, 401);
   assert.equal((await jsonPost("/api/generate-copy", copyInput, firstCookie)).status, 401);
   pass("退出后旧会话失效");
 

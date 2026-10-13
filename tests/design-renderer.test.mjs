@@ -3,19 +3,21 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import ts from "typescript";
 import { sampleProject } from "../lib/design-model.ts";
+import { builtInTextFonts, customFontId, ensureTextFont, isTextFont, textFontFamily } from "../lib/design-fonts.ts";
 
 // Exercise actual drawing commands; browser proofs cover the real rounded font.
 const source = (await readFile(new URL("../lib/design-renderer.ts", import.meta.url), "utf8"))
   .replace('"./design-model"', JSON.stringify(new URL("../lib/design-model.ts", import.meta.url).href))
   .replace('"./app-path"', JSON.stringify(new URL("../lib/app-path.ts", import.meta.url).href))
-  .replace('"./text-color.ts"', JSON.stringify(new URL("../lib/text-color.ts", import.meta.url).href));
+  .replace('"./text-color.ts"', JSON.stringify(new URL("../lib/text-color.ts", import.meta.url).href))
+  .replace('"./design-fonts.ts"', JSON.stringify(new URL("../lib/design-fonts.ts", import.meta.url).href));
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
 });
 const { drawDesign, renderBlob } = await import("data:text/javascript;base64," + Buffer.from(outputText).toString("base64"));
 
 function recordingCanvas({ pixelTone, blockedPixels = false } = {}) {
-  const rectangles = [], texts = [], images = [], events = [];
+  const rectangles = [], texts = [], images = [], events = [], measurements = [];
   let path;
   const ctx = {
     font: "400 16px sans-serif", textAlign: "left", fillStyle: "#000",
@@ -33,6 +35,7 @@ function recordingCanvas({ pixelTone, blockedPixels = false } = {}) {
     roundRect(x, y, width, height) { path = { x, y, width, height }; },
     fill() { if (path) rectangles.push({ ...path, color: this.fillStyle }); events.push("fill"); },
     measureText(value) {
+      measurements.push({ value, font: this.font });
       const size = Number(this.font.match(/([\d.]+)px/)?.[1] || 16);
       return { width: [...value].reduce((total, char) => total + (/[^\x00-\xff]/.test(char) ? size : size * 0.55), 0) };
     },
@@ -40,7 +43,7 @@ function recordingCanvas({ pixelTone, blockedPixels = false } = {}) {
       const width = this.measureText(value).width;
       const height = Number(this.font.match(/([\d.]+)px/)?.[1] || 16);
       const x = this.textAlign === "right" ? anchor - width : this.textAlign === "center" ? anchor - width / 2 : anchor;
-      texts.push({ value, x, y, width, height, anchor, align: this.textAlign, color: this.fillStyle, weight: Number(this.font.split(" ")[0]) });
+      texts.push({ value, x, y, width, height, anchor, align: this.textAlign, color: this.fillStyle, weight: Number(this.font.split(" ")[0]), font: this.font });
       events.push("text");
     },
   };
@@ -51,7 +54,7 @@ function recordingCanvas({ pixelTone, blockedPixels = false } = {}) {
     return { data: pixels };
   };
   return {
-    width: 0, height: 0, getContext: () => ctx, rectangles, texts, images, events,
+    width: 0, height: 0, getContext: () => ctx, rectangles, texts, images, events, measurements,
     toBlob(callback, type) { callback(new Blob(["recorded export"], { type })); },
   };
 }
@@ -61,12 +64,16 @@ async function renderModule({
   title = "近看织物的柔软肌理", subtitle = "保留实物颜色与细节，近景展示面料纹理。",
   sellingPoints = "细密格纹\n真实绗缝\n柔和配色\n未经选择的第四条",
   category = "quilt", template = "vip", info = {},
-  imageZoom, cropX = 50, cropY = 50, textPosition, textColor, titleColor, subtitleColor,
+  imageZoom, cropX = 50, cropY = 50, textPosition, textColor, titleColor, subtitleColor, titleFont, subtitleFont,
   pixelTone, blockedPixels = false, legacy = false, index,
   assetNames, assetRoles, exportImage = false,
 } = {}) {
-  const previousDocument = globalThis.document, previousImage = globalThis.Image;
-  globalThis.document = { fonts: { load: async () => [] } };
+  const previousDocument = globalThis.document, previousImage = globalThis.Image, previousFontFace = globalThis.FontFace;
+  globalThis.document = { fonts: { load: async () => [{}], add() {} } };
+  globalThis.FontFace = class {
+    status = "unloaded";
+    async load() { this.status = "loaded"; return this; }
+  };
   globalThis.Image = class {
     naturalWidth = 1200; naturalHeight = 1200;
     set src(value) { this.source = value; queueMicrotask(() => this.onload?.()); }
@@ -79,7 +86,7 @@ async function renderModule({
     if (assetRoles) assetRoles.forEach((role, i) => { project.assets[i].role = role; });
     const module = {
       ...project.modules.find(item => item.section === section) || project.modules[0],
-      kind, section, composition, title, subtitle, imageZoom, cropX, cropY, textPosition, textColor, titleColor, subtitleColor,
+      kind, section, composition, title, subtitle, imageZoom, cropX, cropY, textPosition, textColor, titleColor, subtitleColor, titleFont, subtitleFont,
       imageId: project.assets[0].id, imageId2: second ? project.assets[1].id : "",
       sourceImageId: project.assets[0].id, sourceImageId2: second ? project.assets[1].id : "",
       ...(index === undefined ? {} : { index }),
@@ -100,6 +107,7 @@ async function renderModule({
   } finally {
     if (previousDocument === undefined) delete globalThis.document; else globalThis.document = previousDocument;
     if (previousImage === undefined) delete globalThis.Image; else globalThis.Image = previousImage;
+    if (previousFontFace === undefined) delete globalThis.FontFace; else globalThis.FontFace = previousFontFace;
   }
 }
 
@@ -235,6 +243,93 @@ test("separate colors independently inherit the shared legacy color and explicit
     assert.equal(legacy.canvas.texts.find(line => line.value === "面料成分").color,
       textColor === "light" ? "#ffffff" : textColor === "#a76645" ? "#A76645" : "#696969",
       "legacy parameter labels keep their original appearance");
+  }
+});
+
+test("title and description fonts independently control measured copy, captions and parameter rows in preview and export", async () => {
+  const titleLabels = new Set(["奶油白", "淡粉色", "被套", "枕套", "商品名称", "品牌", "面料成分", "套件组成", "尺寸规格", "颜色", "洗护说明"]);
+  for (const [titleFont, subtitleFont] of [["serif", "sans"], ["kai", "rounded"], ["custom:47dcd76d-796a-4e8e-9a22-111111111111", "serif"]]) {
+    for (const kind of ["main", "detail"]) for (const section of ["hero", "colors", "components", "specs"]) {
+      const options = { kind, section, title: "专属主标题", subtitle: "独立补充说明", titleFont, subtitleFont, second: true,
+        category: "bedding-set", info: { colors: "奶油白、淡粉色", material: "用户确认的棉面料" },
+        assetNames: ["奶油白实拍", "淡粉色实拍"], assetRoles: ["被套", "枕套"] };
+      const preview = await renderModule(options);
+      for (const line of preview.canvas.texts) {
+        const font = line.weight === 700 || titleLabels.has(line.value) ? titleFont : subtitleFont;
+        assert.ok(line.font.endsWith(textFontFamily(font)), `${kind}/${section}/${line.value} uses its own font`);
+      }
+      for (const measurement of preview.canvas.measurements) {
+        if (measurement.value.includes("专属")) assert.ok(measurement.font.endsWith(textFontFamily(titleFont)), "headline measurement uses its selected face");
+        if (measurement.value.includes("独立")) assert.ok(measurement.font.endsWith(textFontFamily(subtitleFont)), "description measurement uses its selected face");
+      }
+      assertInsideCanvas(preview.canvas); assertNoCopyBacking(preview.canvas);
+      const exported = await renderModule({ ...options, exportImage: true });
+      assert.equal(exported.blob.type, "image/jpeg");
+      assert.deepEqual(exported.canvas.texts, preview.canvas.texts);
+    }
+  }
+  const legacy = await renderModule();
+  assert.ok(legacy.canvas.texts.every(line => line.font.endsWith("TextileSans, sans-serif")), "old saved modules keep the original rounded face");
+});
+
+test("font loading caches only requested families, shares custom loads and uses safe same-origin IDs", async () => {
+  const previousDocument = globalThis.document, previousFontFace = globalThis.FontFace;
+  const previousBase = process.env.NEXT_PUBLIC_APP_BASE_PATH;
+  const requested = [], customFaces = [], added = [];
+  globalThis.document = { fonts: { load: async value => { requested.push(value); return [{}]; }, add(face) { added.push(face); } } };
+  globalThis.FontFace = class {
+    status = "unloaded";
+    constructor(family, source) { this.family = family; this.source = source; customFaces.push(this); }
+    async load() { this.status = "loaded"; return this; }
+  };
+  try {
+    await Promise.all([ensureTextFont("serif"), ensureTextFont("serif")]);
+    assert.equal(requested.length, 3, "one face and its three weights are shared by concurrent previews");
+    assert.ok(requested.every(value => value.endsWith("TextileSerif, serif")));
+    process.env.NEXT_PUBLIC_APP_BASE_PATH = "/zhijing";
+    const custom = "custom:47DCD76D-796A-4E8E-9A22-111111111111";
+    await Promise.all([ensureTextFont(custom), ensureTextFont(custom.toLowerCase())]);
+    assert.equal(requested.length, 3, "custom fonts never load every built-in font");
+    assert.equal(customFaces.length, 1);
+    assert.equal(added.length, 1);
+    assert.equal(customFaces[0].family, "ZhijingFont_47dcd76d796a4e8e9a22111111111111");
+    assert.equal(customFaces[0].source, 'url("/zhijing/api/fonts/47dcd76d-796a-4e8e-9a22-111111111111")');
+    assert.equal(customFontId(custom), "47dcd76d-796a-4e8e-9a22-111111111111");
+    for (const invalid of ["custom:../../secret", "custom:abc", "custom:47dcd76d-796a-4e8e-9a22-111111111111?url=x", "serif;url(x)", "", null]) {
+      assert.equal(isTextFont(invalid), false);
+      assert.throws(() => textFontFamily(invalid), /字体设置无效/);
+    }
+    assert.ok(builtInTextFonts.every(font => isTextFont(font.value)));
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document; else globalThis.document = previousDocument;
+    if (previousFontFace === undefined) delete globalThis.FontFace; else globalThis.FontFace = previousFontFace;
+    if (previousBase === undefined) delete process.env.NEXT_PUBLIC_APP_BASE_PATH; else process.env.NEXT_PUBLIC_APP_BASE_PATH = previousBase;
+  }
+});
+
+test("failed custom or missing bundled fonts block export and permit a later retry", async () => {
+  const previousDocument = globalThis.document, previousFontFace = globalThis.FontFace;
+  let attempts = 0, available = false, exported = 0;
+  const project = sampleProject();
+  const custom = "custom:47dcd76d-796a-4e8e-9a22-222222222222";
+  globalThis.document = { fonts: { load: async () => available ? [{}] : [], add() {} },
+    createElement: () => ({ toBlob() { exported++; } }) };
+  globalThis.FontFace = class {
+    status = "unloaded";
+    async load() { attempts++; if (!available) throw new Error("Network unavailable"); this.status = "loaded"; return this; }
+  };
+  try {
+    const module = { ...project.modules[0], titleFont: custom, subtitleFont: custom };
+    await assert.rejects(renderBlob(project, module), /自定义字体暂时无法加载/);
+    assert.equal(attempts, 1, "title and description share the failed request");
+    assert.equal(exported, 0, "a fallback design is never downloaded");
+    await assert.rejects(ensureTextFont("rounded"), /文案字体暂时无法加载/);
+    available = true;
+    await Promise.all([ensureTextFont(custom), ensureTextFont("rounded")]);
+    assert.equal(attempts, 2, "a failed custom request is retried instead of permanently cached");
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document; else globalThis.document = previousDocument;
+    if (previousFontFace === undefined) delete globalThis.FontFace; else globalThis.FontFace = previousFontFace;
   }
 });
 

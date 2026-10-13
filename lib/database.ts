@@ -20,6 +20,7 @@ const migrations = [
   "0002_copy_model.sql",
   "0003_copy_model_id.sql",
   "0004_image_quality.sql",
+  "0005_custom_fonts.sql",
 ] as const;
 
 const databaseState = globalThis as typeof globalThis & {

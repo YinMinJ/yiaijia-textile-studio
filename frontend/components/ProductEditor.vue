@@ -7,6 +7,8 @@ import { buildPhotographyPlan } from "../../lib/product-photography";
 import type { StudioContext } from "../useStudio";
 import CanvasPreview from "./CanvasPreview.vue";
 import CopyColorControl from "./CopyColorControl.vue";
+import CopyFontControl from "./CopyFontControl.vue";
+import { useCopyFonts } from "../useCopyFonts";
 
 const props = defineProps<{ studio: StudioContext }>();
 const s = props.studio;
@@ -55,6 +57,30 @@ const dragging = ref(false);
 const editDialog = ref<HTMLDialogElement | null>(null);
 const previewSource = ref<Asset | null>(null);
 const sourceDialog = ref<HTMLDialogElement | null>(null);
+const copyFonts = useCopyFonts();
+const fontInput = ref<HTMLInputElement | null>(null);
+const fontTarget = ref<"titleFont" | "subtitleFont">("titleFont");
+const fontMessage = ref("");
+function chooseFontFile(target: "titleFont" | "subtitleFont") {
+  if (busy.value) return;
+  fontTarget.value = target;
+  fontInput.value?.click();
+}
+async function uploadFontFile(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file || busy.value || !activeModule.value) return;
+  const moduleId = activeModule.value.id, projectId = p.value?.id, target = fontTarget.value;
+  fontMessage.value = "";
+  s.busy.value = "正在上传字体";
+  try {
+    const font = await copyFonts.upload(file);
+    s.busy.value = "";
+    if (p.value?.id === projectId && activeModule.value?.id === moduleId) s.updateModule({ [target]: font });
+  } catch (e) { fontMessage.value = e instanceof Error ? e.message : "字体上传失败，请重试。"; }
+  finally { s.busy.value = ""; }
+}
 
 function info(key: keyof ProductInfo, event: Event) {
   s.updateInfo(key, (event.target as HTMLInputElement | HTMLTextAreaElement).value);
@@ -124,6 +150,7 @@ function goHome() { if (!busy.value) s.view.value = "home"; }
 function retry(m?: DesignModule) { if (p.value) void s.runAI(p.value, m?.id); }
 watch(activeModule, async (value) => {
   await nextTick();
+  if (value) void copyFonts.load();
   if (value && !editDialog.value?.open) editDialog.value?.showModal();
   if (!value && editDialog.value?.open) editDialog.value?.close();
 }, { immediate: true });
@@ -207,9 +234,15 @@ onBeforeUnmount(() => { editDialog.value?.close(); sourceDialog.value?.close(); 
             <div class="edit-canvas"><CanvasPreview :project="p" :module="activeModule" large /></div>
             <fieldset class="edit-form" :disabled="busy">
               <label class="field">主标题<textarea :value="activeModule.title" rows="2" maxlength="40" placeholder="建议 1–2 行，回车可手动换行" @input="localEdit('title', $event)" /><small>建议 1–2 行短标题，回车可手动换行。</small></label>
+              <CopyFontControl id="title-font" label="主标题" :value="activeModule.titleFont ?? 'rounded'" :fonts="copyFonts.fonts.value" :disabled="busy" @change="s.updateModule({ titleFont: $event })" @upload="chooseFontFile('titleFont')" />
               <CopyColorControl :key="`${activeModule.id}-title`" id="title-color" label="主标题" :value="activeModule.titleColor ?? activeModule.textColor ?? 'auto'" :disabled="busy" @change="s.updateModule({ titleColor: $event })" />
               <label class="field">补充说明<textarea :value="activeModule.subtitle" rows="3" maxlength="100" @input="localEdit('subtitle', $event)" /></label>
+              <CopyFontControl id="subtitle-font" label="补充说明" :value="activeModule.subtitleFont ?? 'rounded'" :fonts="copyFonts.fonts.value" :disabled="busy" @change="s.updateModule({ subtitleFont: $event })" @upload="chooseFontFile('subtitleFont')" />
               <CopyColorControl :key="`${activeModule.id}-subtitle`" id="subtitle-color" label="补充说明" :value="activeModule.subtitleColor ?? activeModule.textColor ?? 'auto'" :disabled="busy" @change="s.updateModule({ subtitleColor: $event })" />
+              <input ref="fontInput" class="visually-hidden" type="file" accept=".ttf,.otf,.woff,.woff2" aria-label="选择自定义字体文件" @change="uploadFontFile" />
+              <p class="field-footnote font-note">上传的字体可在“我的字体”中重复使用。支持 TTF / OTF / WOFF / WOFF2，单个文件不超过20MB，每个账号最多20个、合计100MB。</p>
+              <p v-if="copyFonts.error.value" class="font-error" role="alert">{{ copyFonts.error.value }} <button type="button" class="text-button" :disabled="busy || copyFonts.loading.value" @click="copyFonts.load">重新读取</button></p>
+              <p v-if="fontMessage" class="font-error" role="alert">{{ fontMessage }}</p>
               <label v-if="!factsOnly(activeModule)" class="field">画面编排<select :value="activeModule.composition || 'auto'" @change="localEdit('composition', $event)"><option v-for="composition in compositions" :key="composition.value" :value="composition.value">{{ composition.label }}</option></select><small>{{ compositions.find(composition => composition.value === (activeModule!.composition || 'auto'))?.hint }}。切换后立即预览，已有照片继续使用。</small></label>
               <label v-if="!factsOnly(activeModule)" class="field">文案位置<select :value="activeModule.textPosition || 'auto'" @change="localEdit('textPosition', $event)"><option v-for="position in textPositions" :key="position.value" :value="position.value">{{ position.label }}</option></select></label>
               <p v-if="!factsOnly(activeModule)" class="field-footnote">文字直接叠在图片上，无底色；选择留白位置更清晰。</p>
@@ -259,4 +292,5 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}button:disabled{
 /* Style choices show the same unboxed photo overlay used in exports. */
 .style-card .style-art{padding:0;aspect-ratio:1;position:relative;overflow:hidden}.style-card .style-art img{position:absolute;inset:0;width:100%;height:100%;aspect-ratio:auto;object-fit:cover;border-radius:0}.style-card .style-brand{position:absolute;z-index:1;top:13px;left:13px;margin:0;font-size:8px;letter-spacing:.5px}.style-card .style-art strong{position:absolute;z-index:1;top:32px;right:16px;max-width:80%;margin:0;font-size:21px;line-height:1.4;text-align:right;letter-spacing:0;font-weight:700}.style-card .style-art small{position:absolute;z-index:1;bottom:12px;right:13px;max-width:85%;margin:0;font-size:9px;line-height:1.6;text-align:right;opacity:.75}
 @media(max-width:560px){.style-card .style-art strong{top:28px;right:11px;font-size:15px}.style-card .style-brand{top:10px;left:10px;font-size:6px}.style-card .style-art small{font-size:7px;bottom:9px;right:10px}}
+.font-note{margin:0 0 16px}.font-error{font-size:12px;line-height:1.8;color:#b44c35;margin:0 0 16px}
 </style>

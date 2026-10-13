@@ -1,4 +1,6 @@
 import type { CustomTextColor } from "./text-color.ts";
+import type { TextFont } from "./design-fonts.ts";
+export type { TextFont } from "./design-fonts.ts";
 
 export type TemplateId = "vip" | "warm" | "clean" | "editorial";
 export type ProductCategory = "quilt" | "bedding-set";
@@ -58,6 +60,8 @@ export type DesignModule = {
   textColor?: TextColor;
   titleColor?: TextColor;
   subtitleColor?: TextColor;
+  titleFont?: TextFont;
+  subtitleFont?: TextFont;
   sourceImageId?: string;
   sourceImageId2?: string;
   aiStatus?: "pending" | "succeeded" | "failed";
@@ -496,6 +500,8 @@ export function updateProjectTemplate(p: Project, template: TemplateId): Project
       ...(previous.textColor ? { textColor: previous.textColor } : {}),
       ...(previous.titleColor ? { titleColor: previous.titleColor } : {}),
       ...(previous.subtitleColor ? { subtitleColor: previous.subtitleColor } : {}),
+      ...(previous.titleFont ? { titleFont: previous.titleFont } : {}),
+      ...(previous.subtitleFont ? { subtitleFont: previous.subtitleFont } : {}),
       ...(original ? {
         imageId: original.id,
         sourceImageId: original.id,

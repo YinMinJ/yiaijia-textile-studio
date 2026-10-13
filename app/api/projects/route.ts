@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { owner, db, errorResponse, checkOrigin } from "@/lib/server-store";
 import { isCustomTextColor } from "@/lib/text-color";
+import { isTextFont, customFontId } from "@/lib/design-fonts";
 const bounded = z.string().max(200);
 const textColor = z.union([
   z.enum(["auto", "dark", "light"]),
   z.string().refine(isCustomTextColor).transform(value => value.toUpperCase()),
 ]);
+const textFont = z.string().refine(isTextFont);
 const info = z.object({
   brand: bounded,
   name: bounded.min(1),
@@ -46,6 +48,8 @@ const module = z.object({
   textColor: textColor.optional(),
   titleColor: textColor.optional(),
   subtitleColor: textColor.optional(),
+  titleFont: textFont.optional(),
+  subtitleFont: textFont.optional(),
   sourceImageId: z.string().max(80).optional(),
   sourceImageId2: z.string().max(80).optional(),
   aiStatus: z.enum(["pending", "succeeded", "failed"]).optional(),
@@ -135,6 +139,11 @@ export async function POST(request: Request) {
       .first<{ owner_id: string }>();
     if (held && held.owner_id !== uid)
       return new Response("Forbidden", { status: 403 });
+    const fontIds = new Set(p.modules.flatMap(m => [customFontId(m.titleFont), customFontId(m.subtitleFont)]).filter(Boolean));
+    for (const fontId of fontIds) {
+      const font = await db().prepare("SELECT id FROM fonts WHERE id = ? AND owner_id = ?").bind(fontId!, uid).first();
+      if (!font) return Response.json({ error: "所选字体不存在，请重新上传或选择其他字体。" }, { status: 400 });
+    }
     for (const a of p.assets) {
       if (a.url.startsWith("/samples/")) {
         if (

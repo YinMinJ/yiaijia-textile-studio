@@ -1,0 +1,57 @@
+Bundled copy typography fonts
+=============================
+
+These fonts are self-hosted application assets. No system font is redistributed
+and no third-party font CDN is contacted when the application renders copy.
+All three fonts use the SIL Open Font License 1.1. The complete, unchanged
+upstream licenses are included alongside the font files.
+
+Noto Sans SC (TextileSansPlain)
+------------------------------
+Upstream: https://github.com/google/fonts/tree/66928797f271fed5ee428544e7229685e2d90127/ofl/notosanssc
+Source: https://raw.githubusercontent.com/google/fonts/66928797f271fed5ee428544e7229685e2d90127/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf
+Source SHA-256: a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da
+Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
+License: NotoSansSC-LICENSE.txt
+Weight axis: 100-900.
+
+Noto Serif SC (TextileSerif)
+--------------------------
+Upstream: https://github.com/google/fonts/tree/66928797f271fed5ee428544e7229685e2d90127/ofl/notoserifsc
+Source: https://raw.githubusercontent.com/google/fonts/66928797f271fed5ee428544e7229685e2d90127/ofl/notoserifsc/NotoSerifSC%5Bwght%5D.ttf
+Source SHA-256: 050080d9255a86808f2945bffac582b31ef32bc36411ce29563b4961670c66f9
+Copyright 2012 Google Inc. All Rights Reserved.
+License: NotoSerifSC-LICENSE.txt
+Weight axis: 200-900.
+
+Textile Kai (TextileKai)
+-----------------------
+Derived from LXGW WenKai GB Lite v1.522, Regular (400).
+Upstream: https://github.com/lxgw/LxgwWenkaiGB-Lite
+Release: https://github.com/lxgw/LxgwWenkaiGB-Lite/releases/tag/v1.522
+Source: https://github.com/lxgw/LxgwWenkaiGB-Lite/releases/download/v1.522/LXGWWenKaiGBLite-Regular.ttf
+Source SHA-256: 1675c708cce181871d9a8adc987f35a0cabc6ff980685cd99f05d2655ea08c4c
+Copyright 2024-2026 LXGW (https://github.com/lxgw/LxgwWenkaiGB-Lite).
+Copyright 2020 The Klee Project Authors (https://github.com/fontworks-fonts/Klee).
+License: TextileKai-LICENSE.txt
+The derivative font family and PostScript names have been changed to Textile Kai
+and TextileKai-Regular, respecting the upstream Reserved Font Names. Copyright,
+license and attribution records remain intact. No upstream endorsement is implied.
+Only the Regular (400) face is bundled; heavier canvas text uses browser synthesis.
+
+Conversion
+----------
+Converted from the pinned TrueType sources to WOFF2 using fontTools 4.66.1 and
+Brotli 1.2.0. All upstream glyphs, outlines, weight variation data and OpenType
+features are retained; no subsetting. The Kai naming changes described above are
+the only semantic metadata changes. These files are provided as Web fonts, not
+installed into the operating system.
+
+Bundled output SHA-256
+---------------------
+NotoSansSC-Variable.woff2 (7,782,136 bytes):
+d6dc5d8437919ad55786d51cc1c24e50dd92136de7b851ce96eb7247d5361250
+NotoSerifSC-Variable.woff2 (11,032,176 bytes):
+97767e395bd56b65d172f91ab250e6631882768af4a31b239bd905cfb2d9de30
+TextileKai-Regular.woff2 (5,322,608 bytes):
+eefe8df1baca02641f769a69968eb5887f86560c96e424b043351f7c0e22bd8d

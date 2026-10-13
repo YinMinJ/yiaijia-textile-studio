@@ -22,6 +22,27 @@
   font-weight: 700;
   font-style: normal;
 }
+@font-face {
+  font-family: TextileSansPlain;
+  src: url("../public/fonts/NotoSansSC-Variable.woff2") format("woff2");
+  font-display: swap;
+  font-weight: 100 900;
+  font-style: normal;
+}
+@font-face {
+  font-family: TextileSerif;
+  src: url("../public/fonts/NotoSerifSC-Variable.woff2") format("woff2");
+  font-display: swap;
+  font-weight: 200 900;
+  font-style: normal;
+}
+@font-face {
+  font-family: TextileKai;
+  src: url("../public/fonts/TextileKai-Regular.woff2") format("woff2");
+  font-display: swap;
+  font-weight: 400;
+  font-style: normal;
+}
 :root {
   --background: #101012;
   --foreground: #f2f0f5;

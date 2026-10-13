@@ -123,6 +123,28 @@ test("reselecting the current template leaves manual copy, AI results and workfl
   assert.equal(updateProjectTemplate(p, p.template), p);
 });
 
+test("independent font edits preserve copy, colors and generated photos when switching templates", () => {
+  const p = { ...sampleProject(), generation: "ai", workflow: "complete", generationBatch: randomUUID() };
+  Object.assign(p.modules[0], { titleColor: "#A04E3B", subtitleColor: "#2E6555", aiStatus: "succeeded" });
+  const before = structuredClone(p);
+  const titleEdit = updatePlanModule(p, p.modules[0].id, { titleFont: "serif" });
+  assert.equal(titleEdit.modules[0].subtitleFont, undefined, "description retains its original rounded default");
+  const edited = updatePlanModule(titleEdit, titleEdit.modules[0].id, { subtitleFont: "custom:47dcd76d-796a-4e8e-9a22-111111111111" });
+  assert.equal(edited.modules[0].titleFont, "serif");
+  assert.equal(edited.modules[0].aiStatus, "succeeded");
+  assert.equal(edited.modules[0].imageId, p.modules[0].imageId);
+  assert.equal(edited.generationBatch, p.generationBatch);
+  assert.equal(edited.workflow, "complete");
+  assert.deepEqual(p, before);
+  const switched = updateProjectTemplate(edited, "warm");
+  assert.equal(switched.modules[0].titleFont, "serif");
+  assert.equal(switched.modules[0].subtitleFont, "custom:47dcd76d-796a-4e8e-9a22-111111111111");
+  assert.equal(switched.modules[0].titleColor, "#A04E3B");
+  assert.equal(switched.modules[0].subtitleColor, "#2E6555");
+  assert.equal(switched.modules[0].title, p.modules[0].title);
+  assert.equal(switched.modules[0].subtitle, p.modules[0].subtitle);
+});
+
 test("switching templates preserves edited copy and real photo crops by purpose rather than image number", () => {
   const p = { ...sampleProject(), generation: "ai", workflow: "complete", generationBatch: randomUUID() };
   for (const module of p.modules) {
@@ -308,6 +330,7 @@ test("switching category rebuilds a plan from originals and resets prior generat
 });
 
 const heldProjects = new Map();
+const heldFonts = new Map();
 let jobs = [];
 globalThis.__designWorkflowRoute = {
   z,
@@ -315,7 +338,9 @@ globalThis.__designWorkflowRoute = {
   checkOrigin: () => {},
   errorResponse: error => { throw error; },
   db: () => ({ prepare: sql => ({ bind: (...args) => ({
-    first: async () => sql.includes("FROM assets") ? { id: args[0] } : heldProjects.has(args[0]) ? { owner_id: "test-owner" } : null,
+    first: async () => sql.includes("FROM assets") ? { id: args[0] }
+      : sql.includes("FROM fonts") ? (heldFonts.get(args[0]) === args[1] ? { id: args[0] } : null)
+      : heldProjects.has(args[0]) ? { owner_id: "test-owner" } : null,
     all: async () => ({ results: sql.includes("FROM generation_jobs") ? jobs.filter(job => !job.id || job.id.startsWith(args[2].slice(0, -1))) : [...heldProjects.values()].map(data => ({ data })) }),
     run: async () => { if (sql.includes("INSERT INTO projects")) heldProjects.set(args[0], args[3]); return { meta: { changes: 1 } }; },
   }) }) }),
@@ -323,7 +348,8 @@ globalThis.__designWorkflowRoute = {
 const routeSource = (await readFile(new URL("../app/api/projects/route.ts", import.meta.url), "utf8"))
   .replace(/import \{ z \} from "zod";/, "const { z } = globalThis.__designWorkflowRoute;")
   .replace(/import \{ owner, db, errorResponse, checkOrigin \} from "@\/lib\/server-store";/, "const { owner, db, errorResponse, checkOrigin } = globalThis.__designWorkflowRoute;")
-  .replace('"@/lib/text-color"', JSON.stringify(new URL("../lib/text-color.ts", import.meta.url).href));
+  .replace('"@/lib/text-color"', JSON.stringify(new URL("../lib/text-color.ts", import.meta.url).href))
+  .replace('"@/lib/design-fonts"', JSON.stringify(new URL("../lib/design-fonts.ts", import.meta.url).href));
 async function loadTs(source) {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } });
   return import("data:text/javascript;base64," + Buffer.from(outputText).toString("base64"));
@@ -430,6 +456,45 @@ test("independent title and description colors survive saves and template change
     const reloaded = (await (await route.GET()).json()).projects[0];
     assert.equal(reloaded.modules[0][field], color);
     assert.equal(reloaded.modules[0][field === "titleColor" ? "subtitleColor" : "titleColor"], field === "titleColor" ? "#24768F" : "#A76645");
+  }
+});
+
+test("independent fonts round trip and projects reject invalid, missing or another owner's font without overwriting saved work", async () => {
+  heldProjects.clear(); heldFonts.clear(); jobs = [];
+  const customId = randomUUID(), otherId = randomUUID();
+  heldFonts.set(customId, "test-owner");
+  heldFonts.set(otherId, "another-owner");
+  const p = { ...sampleProject(), id: randomUUID(), generation: "ai", workflow: "complete", generationBatch: randomUUID() };
+  Object.assign(p.modules[0], { aiStatus: "succeeded", titleColor: "#A04E3B", subtitleColor: "#2E6555" });
+  assert.equal((await post(p)).status, 200);
+  const legacy = (await (await route.GET()).json()).projects[0];
+  assert.equal(legacy.modules[0].titleFont, undefined);
+  assert.equal(legacy.modules[0].subtitleFont, undefined);
+  let saved;
+  for (const titleFont of ["rounded", "sans", "serif", "kai", `custom:${customId}`]) {
+    const edited = updatePlanModule(p, p.modules[0].id, { titleFont, subtitleFont: "serif" });
+    assert.equal((await post(edited)).status, 200);
+    saved = (await (await route.GET()).json()).projects[0];
+    assert.equal(saved.modules[0].titleFont, titleFont);
+    assert.equal(saved.modules[0].subtitleFont, "serif");
+    assert.equal(saved.modules[0].titleColor, "#A04E3B");
+    assert.equal(saved.modules[0].subtitleColor, "#2E6555");
+    assert.equal(saved.modules[0].aiStatus, "succeeded");
+    assert.equal(saved.modules[0].imageId, p.modules[0].imageId);
+    assert.equal(saved.generationBatch, p.generationBatch);
+    assert.deepEqual(saved.modules.slice(1), p.modules.slice(1));
+  }
+  const switched = updateProjectTemplate(saved, "warm");
+  assert.equal((await post(switched)).status, 200);
+  const reloaded = (await (await route.GET()).json()).projects[0];
+  assert.equal(reloaded.modules[0].titleFont, `custom:${customId}`);
+  assert.equal(reloaded.modules[0].subtitleFont, "serif");
+  const beforeInvalid = heldProjects.get(p.id);
+  for (const field of ["titleFont", "subtitleFont"]) {
+    for (const font of ["unknown", "", null, 7, "serif;url(x)", "custom:../font", `custom:${randomUUID()}`, `custom:${otherId}`]) {
+      assert.equal((await post({ ...switched, modules: [{ ...switched.modules[0], [field]: font }] })).status, 400);
+      assert.equal(heldProjects.get(p.id), beforeInvalid, `invalid or inaccessible ${field} cannot overwrite the saved project`);
+    }
   }
 });
 

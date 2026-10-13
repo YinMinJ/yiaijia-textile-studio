@@ -8,6 +8,7 @@ import {
 } from "./design-model";
 import { appPath } from "./app-path";
 import { isCustomTextColor } from "./text-color.ts";
+import { ensureTextFont, textFontFamily } from "./design-fonts.ts";
 const pictures = new Map<string, Promise<HTMLImageElement>>();
 function picture(url: string) {
   if (!pictures.has(url))
@@ -24,18 +25,6 @@ function picture(url: string) {
       }),
     );
   return pictures.get(url)!;
-}
-let fontReady: Promise<unknown> | null = null;
-function font() {
-  if (!fontReady) {
-    fontReady = Promise.all([400, 500, 700].map((weight) =>
-      document.fonts.load(`${weight} 16px TextileSans`, "织境 家纺 Aa 0123 ×"),
-    )).catch(() => {
-      fontReady = null;
-      throw new Error("文案字体暂时无法加载，请刷新页面后重试。");
-    });
-  }
-  return fontReady;
 }
 function cover(
   ctx: CanvasRenderingContext2D,
@@ -128,6 +117,7 @@ function textBox(
     align?: CanvasTextAlign;
     leading?: number;
     headline?: boolean;
+    family: string;
   },
 ) {
   if (!value.trim()) return y;
@@ -135,7 +125,7 @@ function textBox(
   let size = options.size;
   let lines: string[] = [];
   for (;;) {
-    ctx.font = `${options.weight ?? 400} ${size}px TextileSans, sans-serif`;
+    ctx.font = `${options.weight ?? 400} ${size}px ${options.family}`;
     lines = options.headline ? headlineLines(ctx, value, width) : wrapLines(ctx, value, width);
     if (lines.length * size * leading <= height || size <= (options.min ?? 20))
       break;
@@ -204,6 +194,8 @@ async function drawReference(
   const appearance = m as CopyAppearance;
   const titleColor = appearance.titleColor ?? appearance.textColor ?? "auto";
   const subtitleColor = appearance.subtitleColor ?? appearance.textColor ?? "auto";
+  const titleFamily = textFontFamily(m.titleFont);
+  const subtitleFamily = textFontFamily(m.subtitleFont);
   const section = moduleSection(m);
   const composition = m.composition || "auto";
   const position = appearance.textPosition && appearance.textPosition !== "auto"
@@ -222,7 +214,7 @@ async function drawReference(
   const copy = (value: string, x: number, y: number, width: number, height: number,
     size: number, options: Partial<Parameters<typeof textBox>[6]> = {}) =>
     textBox(ctx, value, x, y, width, height, {
-      size, min: w * 0.021, color: "#262626", ...options,
+      size, min: w * 0.021, color: "#262626", family: titleFamily, ...options,
     });
   const headlineX = left ? pad : w * 0.265;
   const headlineWidth = w * 0.735 - pad;
@@ -231,17 +223,17 @@ async function drawReference(
   const titleLimit = w * 0.215, subtitleLimit = w * 0.125;
   const gap = w * 0.015;
   const heightFor = (value: string, width: number, size: number, limit: number,
-    weight: number, leading: number, min: number, headline = false) => {
+    weight: number, leading: number, min: number, family: string, headline = false) => {
     if (!value.trim()) return 0;
     while (true) {
-      ctx.font = `${weight} ${size}px TextileSans, sans-serif`;
+      ctx.font = `${weight} ${size}px ${family}`;
       const count = (headline ? headlineLines(ctx, value, width) : wrapLines(ctx, value, width)).length;
       if (count * size * leading <= limit || size <= min) return Math.min(limit, count * size * leading);
       size--;
     }
   };
-  const titleHeight = heightFor(m.title, headlineWidth, titleSize, titleLimit, 700, 1.2, w * 0.032, true);
-  const subtitleHeight = heightFor(subtitle, headlineWidth, subtitleSize, subtitleLimit, 400, 1.25, w * 0.021);
+  const titleHeight = heightFor(m.title, headlineWidth, titleSize, titleLimit, 700, 1.2, w * 0.032, titleFamily, true);
+  const subtitleHeight = heightFor(subtitle, headlineWidth, subtitleSize, subtitleLimit, 400, 1.25, w * 0.021, subtitleFamily);
   const copyHeight = titleHeight + (subtitleHeight && titleHeight ? gap : 0) + subtitleHeight;
   const topY = w * 0.067;
   const copyY = bottom ? h - pad - copyHeight : topY;
@@ -252,7 +244,7 @@ async function drawReference(
     const end = copy(m.title, headlineX, copyY, headlineWidth, Math.max(titleHeight, 1), titleSize,
       { min: w * 0.032, weight: 700, leading: 1.2, align, color: titleInk, headline: true });
     if (subtitleHeight) copy(subtitle, headlineX, end + (titleHeight ? gap : 0), headlineWidth,
-      subtitleHeight, subtitleSize, { min: w * 0.021, leading: 1.25, align, color: subtitleInk });
+      subtitleHeight, subtitleSize, { min: w * 0.021, leading: 1.25, align, color: subtitleInk, family: subtitleFamily });
   };
   if (section === "specs") {
     heading(false);
@@ -269,7 +261,7 @@ async function drawReference(
     let size = w * 0.034;
     let heights: number[] = [];
     for (;;) {
-      ctx.font = `400 ${size}px TextileSans, sans-serif`;
+      ctx.font = `400 ${size}px ${subtitleFamily}`;
       heights = rows.map(([, value]) => Math.max(w * 0.085,
         wrapLines(ctx, value, valueWidth).length * size * 1.3 + w * 0.032));
       if (heights.reduce((sum, value) => sum + value, 0) <= rowBottom - rowTop || size <= w * 0.019) break;
@@ -288,7 +280,7 @@ async function drawReference(
       copy(label, pad, y + w * 0.012, inner * 0.22, Math.max(1, height - w * 0.02), Math.min(size, w * 0.029),
         { min: w * 0.017, color: labelInk });
       copy(value, valueX, y + w * 0.012, valueWidth, Math.max(1, height - w * 0.02), size,
-        { min: w * 0.019, leading: 1.3, color: subtitleInk });
+        { min: w * 0.019, leading: 1.3, color: subtitleInk, family: subtitleFamily });
       y += height;
     });
     return;
@@ -386,7 +378,7 @@ export async function drawDesign(
   m: DesignModule,
   scale = 1,
 ) {
-  await font();
+  await Promise.all([ensureTextFont(m.titleFont), ensureTextFont(m.subtitleFont)]);
   const size = dimensions(m);
   canvas.width = Math.round(size.width * scale);
   canvas.height = Math.round(size.height * scale);
