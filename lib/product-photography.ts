@@ -7,6 +7,7 @@ import {
   type DesignModule,
   type ModuleSection,
   type Project,
+  type TextColor,
 } from "./design-model.ts";
 import { isCustomTextColor } from "./text-color.ts";
 
@@ -73,11 +74,17 @@ export function buildPhotographyPlan(
   }[position];
   const isBottom = position.startsWith("bottom");
   const isLeft = position.endsWith("left");
-  const contrast = isCustomTextColor(module.textColor)
-    ? `用户已指定文案颜色 ${module.textColor.toUpperCase()}，程序会保留该颜色；这一区域选择与文字有清晰对比的真实背景，保持光线自然、纹理平缓，不改变商品本身颜色，不加渐变遮罩。`
-    : module.textColor === "light"
+  const titleColor = module.titleColor ?? module.textColor ?? "auto";
+  const subtitleColor = module.subtitleColor ?? module.textColor ?? "auto";
+  const colorName = (color: TextColor) => isCustomTextColor(color) ? color.toUpperCase()
+    : color === "light" ? "白色" : color === "dark" ? "深色" : "根据原照片明暗自动选择深浅";
+  const contrast = titleColor !== subtitleColor
+    ? `用户为后续排版分别指定主标题颜色：${colorName(titleColor)}；补充说明颜色：${colorName(subtitleColor)}。程序独立保留两者的颜色设置；文字安全区选择能兼顾两种文字清晰度的真实背景，保持光线自然、纹理平缓，不改变商品本身颜色，不加渐变遮罩。这些颜色只用于程序排版，照片中不要生成文字。`
+    : isCustomTextColor(titleColor)
+      ? `用户已指定文案颜色 ${titleColor.toUpperCase()}，程序会保留该颜色；这一区域选择与文字有清晰对比的真实背景，保持光线自然、纹理平缓，不改变商品本身颜色，不加渐变遮罩。`
+      : titleColor === "light"
       ? "用户选择浅色文字，这一区域优先安排低对比、较深的真实背景或自然阴影，保留实际商品颜色，不将商品染暗。"
-      : module.textColor === "dark"
+      : titleColor === "dark"
         ? "用户选择深色文字，这一区域优先安排低对比、较浅的真实背景或实际浅色布面，不漂白商品。"
         : "这一区域保持光线自然、明暗一致和低对比，程序根据原照片明暗选择深浅文字，不加渐变遮罩。";
   const safeArea = `短标题安全区在${positionName}，横向约${isLeft ? "5%至70%" : "30%至95%"}、纵向约${isBottom ? "70%至96%" : "3%至30%"}。后续文案直接叠在真实照片上，一至两行大标题配短说明，不使用填充背景；所有摄影版式都保持文字区域下方有真实照片，不额外添加白色、奶油色留白条或照片外文案区。${contrast}不要让关键花型、拉链、枕套边角或抢眼摆件落入文字区；避免为留空缩小床品或造出整片白洞。`;

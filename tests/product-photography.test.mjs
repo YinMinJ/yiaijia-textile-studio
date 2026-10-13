@@ -90,6 +90,14 @@ test("manual text corner and color change the real safe area without fabricating
   assert.match(custom, /用户已指定文案颜色 #A76645，程序会保留该颜色/);
   assert.match(custom, /不改变商品本身颜色，不加渐变遮罩/);
   assert.doesNotMatch(custom, /程序根据原照片明暗选择深浅文字/);
+  const independent = buildPhotographyPlan(project, { ...hero, textColor: "light", titleColor: "#a76645", subtitleColor: "#24768f" }).framing;
+  assert.match(independent, /主标题颜色：#A76645；补充说明颜色：#24768F/);
+  assert.match(independent, /不改变商品本身颜色，不加渐变遮罩/);
+  assert.match(independent, /照片中不要生成文字/);
+  const titleOnly = buildPhotographyPlan(project, { ...hero, textColor: "light", titleColor: "#a76645" }).framing;
+  assert.match(titleOnly, /主标题颜色：#A76645；补充说明颜色：白色/);
+  const subtitleOnly = buildPhotographyPlan(project, { ...hero, textColor: "dark", subtitleColor: "#24768f" }).framing;
+  assert.match(subtitleOnly, /主标题颜色：深色；补充说明颜色：#24768F/);
   assert.equal(buildPhotographyPlan(project, { ...hero, textPosition: "auto" }).framing, buildPhotographyPlan(project, hero).framing);
 });
 

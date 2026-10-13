@@ -396,6 +396,43 @@ test("custom colors preserve completed images and template changes, while invali
   }
 });
 
+test("independent title and description colors survive saves and template changes without modifying shared legacy color or image state", async () => {
+  heldProjects.clear(); jobs = [];
+  const p = { ...sampleProject(), id: randomUUID(), generation: "ai", workflow: "complete", generationBatch: randomUUID() };
+  Object.assign(p.modules[0], { aiStatus: "succeeded", textColor: "light" });
+  const titleEdit = updatePlanModule(p, p.modules[0].id, { titleColor: "#a76645" });
+  assert.equal(titleEdit.modules[0].subtitleColor, undefined, "changing title alone does not override the shared description fallback");
+  assert.equal((await post(titleEdit)).status, 200);
+  const partial = (await (await route.GET()).json()).projects[0];
+  assert.equal(partial.modules[0].titleColor, "#A76645");
+  assert.equal(partial.modules[0].subtitleColor, undefined);
+  assert.equal(partial.modules[0].textColor, "light");
+  const edited = updatePlanModule(partial, partial.modules[0].id, { subtitleColor: "#24768f" });
+  assert.equal(edited.generationBatch, p.generationBatch);
+  assert.equal(edited.modules[0].aiStatus, "succeeded");
+  assert.equal(edited.modules[0].imageId, p.modules[0].imageId);
+  assert.equal((await post(edited)).status, 200);
+  const saved = (await (await route.GET()).json()).projects[0];
+  const switched = updateProjectTemplate(saved, "warm");
+  assert.equal(switched.modules[0].titleColor, "#A76645");
+  assert.equal(switched.modules[0].subtitleColor, "#24768F");
+  assert.equal(switched.modules[0].textColor, "light");
+  assert.equal((await post(switched)).status, 200);
+  const beforeInvalid = heldProjects.get(p.id);
+  for (const field of ["titleColor", "subtitleColor"]) {
+    for (const color of ["#fff", "#A7664500", "#GG0000", "#A76645\n", " #A76645", "rgb(167,102,69)", "transparent", "red", "url(secret)", "", 0, null]) {
+      assert.equal((await post({ ...switched, modules: [{ ...switched.modules[0], [field]: color }] })).status, 400);
+      assert.equal(heldProjects.get(p.id), beforeInvalid, `invalid ${field} cannot overwrite saved colors`);
+    }
+  }
+  for (const field of ["titleColor", "subtitleColor"]) for (const color of ["auto", "dark", "light"]) {
+    assert.equal((await post({ ...switched, modules: [{ ...switched.modules[0], [field]: color }] })).status, 200);
+    const reloaded = (await (await route.GET()).json()).projects[0];
+    assert.equal(reloaded.modules[0][field], color);
+    assert.equal(reloaded.modules[0][field === "titleColor" ? "subtitleColor" : "titleColor"], field === "titleColor" ? "#24768F" : "#A76645");
+  }
+});
+
 
 test("project save and reload preserve semantic plans, workflow and original references", async () => {
   heldProjects.clear();

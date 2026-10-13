@@ -4,6 +4,7 @@ import {
   dimensions,
   type Project,
   type DesignModule,
+  type TextColor,
 } from "./design-model";
 import { appPath } from "./app-path";
 import { isCustomTextColor } from "./text-color.ts";
@@ -161,13 +162,13 @@ type CopyAppearance = DesignModule;
 /** Contrast follows the actual picture; it never paints a backing behind copy. */
 function photoInk(
   ctx: CanvasRenderingContext2D,
-  module: CopyAppearance,
+  color: TextColor | undefined,
   box: { x: number; y: number; width: number; height: number },
   onPhoto: boolean,
 ) {
-  if (isCustomTextColor(module.textColor)) return module.textColor.toUpperCase();
-  if (module.textColor === "dark") return "#262626";
-  if (module.textColor === "light") return "#ffffff";
+  if (isCustomTextColor(color)) return color.toUpperCase();
+  if (color === "dark") return "#262626";
+  if (color === "light") return "#ffffff";
   if (!onPhoto || typeof ctx.getImageData !== "function") return "#262626";
   try {
     const transform = typeof ctx.getTransform === "function" ? ctx.getTransform() : { a: 1, d: 1 };
@@ -201,6 +202,8 @@ async function drawReference(
   h: number,
 ) {
   const appearance = m as CopyAppearance;
+  const titleColor = appearance.titleColor ?? appearance.textColor ?? "auto";
+  const subtitleColor = appearance.subtitleColor ?? appearance.textColor ?? "auto";
   const section = moduleSection(m);
   const composition = m.composition || "auto";
   const position = appearance.textPosition && appearance.textPosition !== "auto"
@@ -244,11 +247,12 @@ async function drawReference(
   const copyY = bottom ? h - pad - copyHeight : topY;
   const headingBox = { x: headlineX, y: copyY, width: headlineWidth, height: Math.max(1, copyHeight) };
   const heading = (onPhoto: boolean) => {
-    const ink = photoInk(ctx, appearance, headingBox, onPhoto);
+    const titleInk = photoInk(ctx, titleColor, headingBox, onPhoto);
+    const subtitleInk = photoInk(ctx, subtitleColor, headingBox, onPhoto);
     const end = copy(m.title, headlineX, copyY, headlineWidth, Math.max(titleHeight, 1), titleSize,
-      { min: w * 0.032, weight: 700, leading: 1.2, align, color: ink, headline: true });
+      { min: w * 0.032, weight: 700, leading: 1.2, align, color: titleInk, headline: true });
     if (subtitleHeight) copy(subtitle, headlineX, end + (titleHeight ? gap : 0), headlineWidth,
-      subtitleHeight, subtitleSize, { min: w * 0.021, leading: 1.25, align, color: ink });
+      subtitleHeight, subtitleSize, { min: w * 0.021, leading: 1.25, align, color: subtitleInk });
   };
   if (section === "specs") {
     heading(false);
@@ -273,13 +277,18 @@ async function drawReference(
     }
     const factor = Math.min(1, (rowBottom - rowTop) / (heights.reduce((sum, value) => sum + value, 0) || 1));
     let y = rowTop;
-    const ink = photoInk(ctx, appearance, headingBox, false);
+    const titleInk = photoInk(ctx, titleColor, headingBox, false);
+    const subtitleInk = photoInk(ctx, subtitleColor, headingBox, false);
+    // Older automatic/dark parameter labels were muted gray. Preserve that
+    // appearance until the author explicitly chooses a separate title color.
+    const labelInk = appearance.titleColor !== undefined || titleColor === "light" || isCustomTextColor(titleColor)
+      ? titleInk : "#696969";
     rows.forEach(([label, value], index) => {
       const height = heights[index] * factor;
       copy(label, pad, y + w * 0.012, inner * 0.22, Math.max(1, height - w * 0.02), Math.min(size, w * 0.029),
-        { min: w * 0.017, color: appearance.textColor === "light" || isCustomTextColor(appearance.textColor) ? ink : "#696969" });
+        { min: w * 0.017, color: labelInk });
       copy(value, valueX, y + w * 0.012, valueWidth, Math.max(1, height - w * 0.02), size,
-        { min: w * 0.019, leading: 1.3, color: ink });
+        { min: w * 0.019, leading: 1.3, color: subtitleInk });
       y += height;
     });
     return;
@@ -312,7 +321,7 @@ async function drawReference(
     if (!value) return;
     const box = { x, y, width, height: w * 0.043 };
     copy(value, x, y, width, box.height, w * 0.028,
-      { color: photoInk(ctx, appearance, box, true), align: alignment, min: w * 0.019 });
+      { color: photoInk(ctx, titleColor, box, true), align: alignment, min: w * 0.019 });
   };
   // Component and color views are photographic grids. Captions remain directly
   // on each real picture, without any white footer or colored caption strip.
@@ -366,7 +375,7 @@ async function drawReference(
     if (label) {
       const box = { x: pad, y: bottom ? pad * 1.6 : h - pad - w * 0.038, width: inner, height: w * 0.038 };
       copy(label, box.x, box.y, box.width, box.height, w * 0.028,
-        { color: photoInk(ctx, appearance, box, true), align: "left" });
+        { color: photoInk(ctx, titleColor, box, true), align: "left" });
     }
   }
 }

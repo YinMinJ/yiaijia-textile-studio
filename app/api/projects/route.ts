@@ -2,6 +2,10 @@ import { z } from "zod";
 import { owner, db, errorResponse, checkOrigin } from "@/lib/server-store";
 import { isCustomTextColor } from "@/lib/text-color";
 const bounded = z.string().max(200);
+const textColor = z.union([
+  z.enum(["auto", "dark", "light"]),
+  z.string().refine(isCustomTextColor).transform(value => value.toUpperCase()),
+]);
 const info = z.object({
   brand: bounded,
   name: bounded.min(1),
@@ -39,10 +43,9 @@ const module = z.object({
   section: z.enum(["hero", "benefits", "texture", "filling", "pattern", "components", "craft", "scene", "colors", "specs", "care"]).optional(),
   composition: z.enum(["auto", "immersive", "split", "minimal"]).optional(),
   textPosition: z.enum(["auto", "top-right", "top-left", "bottom-right", "bottom-left"]).optional(),
-  textColor: z.union([
-    z.enum(["auto", "dark", "light"]),
-    z.string().refine(isCustomTextColor).transform(value => value.toUpperCase()),
-  ]).optional(),
+  textColor: textColor.optional(),
+  titleColor: textColor.optional(),
+  subtitleColor: textColor.optional(),
   sourceImageId: z.string().max(80).optional(),
   sourceImageId2: z.string().max(80).optional(),
   aiStatus: z.enum(["pending", "succeeded", "failed"]).optional(),

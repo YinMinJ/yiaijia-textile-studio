@@ -54,7 +54,10 @@ export type DesignModule = {
   section?: ModuleSection;
   composition?: "auto" | "immersive" | "split" | "minimal";
   textPosition?: TextPosition;
+  /** Legacy shared color, retained as the fallback for older saved projects. */
   textColor?: TextColor;
+  titleColor?: TextColor;
+  subtitleColor?: TextColor;
   sourceImageId?: string;
   sourceImageId2?: string;
   aiStatus?: "pending" | "succeeded" | "failed";
@@ -491,6 +494,8 @@ export function updateProjectTemplate(p: Project, template: TemplateId): Project
       ...(previous.composition ? { composition: previous.composition } : {}),
       ...(previous.textPosition ? { textPosition: previous.textPosition } : {}),
       ...(previous.textColor ? { textColor: previous.textColor } : {}),
+      ...(previous.titleColor ? { titleColor: previous.titleColor } : {}),
+      ...(previous.subtitleColor ? { subtitleColor: previous.subtitleColor } : {}),
       ...(original ? {
         imageId: original.id,
         sourceImageId: original.id,

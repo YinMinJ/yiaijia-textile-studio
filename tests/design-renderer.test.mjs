@@ -61,7 +61,7 @@ async function renderModule({
   title = "近看织物的柔软肌理", subtitle = "保留实物颜色与细节，近景展示面料纹理。",
   sellingPoints = "细密格纹\n真实绗缝\n柔和配色\n未经选择的第四条",
   category = "quilt", template = "vip", info = {},
-  imageZoom, cropX = 50, cropY = 50, textPosition, textColor,
+  imageZoom, cropX = 50, cropY = 50, textPosition, textColor, titleColor, subtitleColor,
   pixelTone, blockedPixels = false, legacy = false, index,
   assetNames, assetRoles, exportImage = false,
 } = {}) {
@@ -79,7 +79,7 @@ async function renderModule({
     if (assetRoles) assetRoles.forEach((role, i) => { project.assets[i].role = role; });
     const module = {
       ...project.modules.find(item => item.section === section) || project.modules[0],
-      kind, section, composition, title, subtitle, imageZoom, cropX, cropY, textPosition, textColor,
+      kind, section, composition, title, subtitle, imageZoom, cropX, cropY, textPosition, textColor, titleColor, subtitleColor,
       imageId: project.assets[0].id, imageId2: second ? project.assets[1].id : "",
       sourceImageId: project.assets[0].id, sourceImageId2: second ? project.assets[1].id : "",
       ...(index === undefined ? {} : { index }),
@@ -194,6 +194,47 @@ test("custom colors apply to photo copy, grid captions and specification rows in
     const exported = await renderModule({ ...options, exportImage: true });
     assert.equal(exported.blob.type, "image/jpeg");
     assert.deepEqual(exported.canvas.texts, preview.canvas.texts, "JPEG export keeps exactly the preview's copy and colors");
+  }
+});
+
+test("separate title and description colors remain distinct on photos, captions and facts in preview and export", async () => {
+  const titleLabels = new Set(["奶油白", "淡粉色", "被套", "枕套", "商品名称", "品牌", "面料成分", "套件组成", "尺寸规格", "颜色", "洗护说明"]);
+  for (const kind of ["main", "detail"]) for (const section of ["hero", "colors", "components", "specs", "care"]) {
+    const options = {
+      kind, section, title: "专属主标题", subtitle: "独立补充说明", titleColor: "#a76645", subtitleColor: "#24768f",
+      textColor: "#FF0000", second: true, blockedPixels: true,
+      category: "bedding-set", info: { colors: "奶油白、淡粉色", material: "用户确认的棉面料" },
+      assetNames: ["奶油白实拍", "淡粉色实拍"], assetRoles: ["被套", "枕套"],
+    };
+    const preview = await renderModule(options);
+    assert.ok(preview.canvas.texts.some(line => line.value === "专属主标题"));
+    assert.ok(preview.canvas.texts.some(line => line.value === "独立补充说明"));
+    for (const line of preview.canvas.texts) {
+      const expected = line.weight === 700 || titleLabels.has(line.value) ? "#A76645" : "#24768F";
+      assert.equal(line.color, expected, `${kind}/${section}/${line.value} uses its own copy color`);
+    }
+    assertNoCopyBacking(preview.canvas); assertInsideCanvas(preview.canvas);
+    const exported = await renderModule({ ...options, exportImage: true });
+    assert.equal(exported.blob.type, "image/jpeg");
+    assert.deepEqual(exported.canvas.texts, preview.canvas.texts);
+  }
+});
+
+test("separate colors independently inherit the shared legacy color and explicit auto overrides that legacy color", async () => {
+  for (const override of ["titleColor", "subtitleColor"]) {
+    const result = await renderModule({ section: "hero", title: "主标题", subtitle: "补充说明", textColor: "#a76645", [override]: "#24768f" });
+    assert.equal(result.canvas.texts.find(line => line.value === "主标题").color, override === "titleColor" ? "#24768F" : "#A76645");
+    assert.equal(result.canvas.texts.find(line => line.value === "补充说明").color, override === "subtitleColor" ? "#24768F" : "#A76645");
+    const automatic = await renderModule({ section: "hero", title: "主标题", subtitle: "补充说明", textColor: "#a76645", [override]: "auto", pixelTone: 10 });
+    assert.equal(automatic.canvas.texts.find(line => line.value === (override === "titleColor" ? "主标题" : "补充说明")).color, "#ffffff");
+    const noLegacy = await renderModule({ section: "hero", title: "主标题", subtitle: "补充说明", [override]: "#24768f", pixelTone: 10 });
+    assert.equal(noLegacy.canvas.texts.find(line => line.value === (override === "titleColor" ? "补充说明" : "主标题")).color, "#ffffff", "the unset field falls back to photo contrast");
+  }
+  for (const textColor of [undefined, "auto", "dark", "light", "#a76645"]) {
+    const legacy = await renderModule({ section: "specs", textColor, info: { material: "已确认面料" } });
+    assert.equal(legacy.canvas.texts.find(line => line.value === "面料成分").color,
+      textColor === "light" ? "#ffffff" : textColor === "#a76645" ? "#A76645" : "#696969",
+      "legacy parameter labels keep their original appearance");
   }
 });
 
