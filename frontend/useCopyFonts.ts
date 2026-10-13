@@ -13,12 +13,12 @@ export function useCopyFonts() {
     loading.value = true;
     error.value = "";
     try {
-      const response = await fetch(appPath("/api/fonts"), { signal: AbortSignal.timeout(15000) });
+      const response = await fetch(appPath("/api/fonts"), { signal: AbortSignal.timeout(60000) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "我的字体暂时无法读取，请重试。");
       fonts.value = [...fonts.value, ...data.fonts.filter((font: CustomFont) => !fonts.value.some(existing => existing.id === font.id))];
       loaded = true;
-    } catch (e) { error.value = e instanceof Error ? e.message : "我的字体暂时无法读取，请重试。"; }
+    } catch (e) { error.value = e instanceof Error && !["TimeoutError", "AbortError", "TypeError"].includes(e.name) ? e.message : "我的字体暂时无法读取，请检查网络后重新读取；内置字体仍可选择。"; }
     finally { loading.value = false; }
   }
   async function upload(file: File): Promise<TextFont> {
@@ -29,7 +29,9 @@ export function useCopyFonts() {
     catch { throw new Error("这个字体文件无法读取，请换一个有效的字体文件。"); }
     const form = new FormData();
     form.set("file", file);
-    const response = await fetch(appPath("/api/fonts"), { method: "POST", body: form, signal: AbortSignal.timeout(60000) });
+    let response: Response;
+    try { response = await fetch(appPath("/api/fonts"), { method: "POST", body: form, signal: AbortSignal.timeout(120000) }); }
+    catch { throw new Error("字体上传未完成，请先重新读取字体列表查看结果，再重试上传。"); }
     const data = await response.json().catch(() => null);
     if (!response.ok || !data?.font?.id) throw new Error(data?.error || "字体上传失败，请稍后重试。");
     fonts.value = [data.font, ...fonts.value.filter(font => font.id !== data.font.id)];

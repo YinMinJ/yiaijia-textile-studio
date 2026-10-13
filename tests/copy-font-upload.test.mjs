@@ -56,3 +56,13 @@ test("a late font library response preserves the newly uploaded font and failed 
   assert.equal(next.fonts.error.value, "");
   assert.deepEqual(next.fonts.fonts.value, [uploaded]);
 });
+
+test("font network timeouts show an actionable localized message without automatic uploads", async () => {
+  const { state, fonts } = await fixture();
+  state.respond = async () => { throw new DOMException("signal timed out", "TimeoutError"); };
+  await fonts.load();
+  assert.match(fonts.error.value, /重新读取/);
+  assert.doesNotMatch(fonts.error.value, /signal timed out/);
+  await assert.rejects(fonts.upload(new File(["font bytes"], "Custom.woff2")), /先重新读取字体列表查看结果/);
+  assert.equal(state.calls.length, 2, "timeouts do not automatically duplicate an upload");
+});
