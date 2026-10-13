@@ -322,7 +322,8 @@ globalThis.__designWorkflowRoute = {
 };
 const routeSource = (await readFile(new URL("../app/api/projects/route.ts", import.meta.url), "utf8"))
   .replace(/import \{ z \} from "zod";/, "const { z } = globalThis.__designWorkflowRoute;")
-  .replace(/import \{ owner, db, errorResponse, checkOrigin \} from "@\/lib\/server-store";/, "const { owner, db, errorResponse, checkOrigin } = globalThis.__designWorkflowRoute;");
+  .replace(/import \{ owner, db, errorResponse, checkOrigin \} from "@\/lib\/server-store";/, "const { owner, db, errorResponse, checkOrigin } = globalThis.__designWorkflowRoute;")
+  .replace('"@/lib/text-color"', JSON.stringify(new URL("../lib/text-color.ts", import.meta.url).href));
 async function loadTs(source) {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } });
   return import("data:text/javascript;base64," + Buffer.from(outputText).toString("base64"));
@@ -352,7 +353,7 @@ test("changing visual composition and unboxed text placement preserves generated
   assert.equal((await post({ ...next, modules: [{ ...next.modules[0], composition: "broken" }] })).status, 400);
   assert.equal((await post({ ...next, modules: [{ ...next.modules[0], imageZoom: 2.1 }] })).status, 400);
   assert.equal((await post({ ...next, modules: [{ ...next.modules[0], textPosition: "center" }] })).status, 400);
-  assert.equal((await post({ ...next, modules: [{ ...next.modules[0], textColor: "#000000" }] })).status, 400);
+  assert.equal((await post({ ...next, modules: [{ ...next.modules[0], textColor: "not-a-color" }] })).status, 400);
 });
 
 test("all supported text positions and colors round trip while legacy modules remain compatible", async () => {
@@ -363,14 +364,35 @@ test("all supported text positions and colors round trip while legacy modules re
   assert.equal(savedLegacy.modules[0].textPosition, undefined);
   assert.equal(savedLegacy.modules[0].textColor, undefined);
   for (const textPosition of ["auto", "top-right", "top-left", "bottom-right", "bottom-left"]) {
-    for (const textColor of ["auto", "dark", "light"]) {
+    for (const textColor of ["auto", "dark", "light", "#000000", "#FFFFFF", "#a76645", "#1A2b3C"]) {
       const updated = updatePlanModule(p, p.modules[0].id, { textPosition, textColor });
       assert.equal((await post(updated)).status, 200);
       const reloaded = (await (await route.GET()).json()).projects[0];
       assert.equal(reloaded.modules[0].textPosition, textPosition);
-      assert.equal(reloaded.modules[0].textColor, textColor);
+      assert.equal(reloaded.modules[0].textColor, textColor.startsWith("#") ? textColor.toUpperCase() : textColor);
       assert.deepEqual(reloaded.modules.slice(1), p.modules.slice(1));
     }
+  }
+});
+
+test("custom colors preserve completed images and template changes, while invalid color values cannot overwrite a saved project", async () => {
+  heldProjects.clear(); jobs = [];
+  const p = { ...sampleProject(), id: randomUUID(), generation: "ai", workflow: "complete", generationBatch: randomUUID() };
+  p.modules[0].aiStatus = "succeeded";
+  const edited = updatePlanModule(p, p.modules[0].id, { textColor: "#a76645" });
+  assert.equal(edited.generationBatch, p.generationBatch, "color editing does not regenerate or charge for images");
+  assert.equal(edited.modules[0].aiStatus, "succeeded");
+  assert.equal(edited.modules[0].imageId, p.modules[0].imageId);
+  assert.equal((await post(edited)).status, 200);
+  const saved = (await (await route.GET()).json()).projects[0];
+  const switched = updateProjectTemplate(saved, "warm");
+  assert.equal(switched.modules[0].textColor, "#A76645");
+  assert.equal((await post(switched)).status, 200);
+  const beforeInvalid = heldProjects.get(p.id);
+  for (const textColor of ["#fff", "#A7664500", "#GG0000", "#A76645\n", " #A76645", "rgb(167,102,69)", "transparent", "red", "url(secret)", "", 0, null]) {
+    assert.equal((await post({ ...switched, modules: [{ ...switched.modules[0], textColor }] })).status, 400,
+      `${JSON.stringify(textColor)} is not an opaque six-digit hex color`);
+    assert.equal(heldProjects.get(p.id), beforeInvalid);
   }
 });
 

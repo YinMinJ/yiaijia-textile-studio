@@ -6,6 +6,7 @@ import {
   type DesignModule,
 } from "./design-model";
 import { appPath } from "./app-path";
+import { isCustomTextColor } from "./text-color.ts";
 const pictures = new Map<string, Promise<HTMLImageElement>>();
 function picture(url: string) {
   if (!pictures.has(url))
@@ -155,10 +156,7 @@ function textBox(
   return y + lines.length * size * leading;
 }
 
-type CopyAppearance = DesignModule & {
-  textPosition?: "auto" | "top-right" | "top-left" | "bottom-right" | "bottom-left";
-  textColor?: "auto" | "dark" | "light";
-};
+type CopyAppearance = DesignModule;
 
 /** Contrast follows the actual picture; it never paints a backing behind copy. */
 function photoInk(
@@ -167,6 +165,7 @@ function photoInk(
   box: { x: number; y: number; width: number; height: number },
   onPhoto: boolean,
 ) {
+  if (isCustomTextColor(module.textColor)) return module.textColor.toUpperCase();
   if (module.textColor === "dark") return "#262626";
   if (module.textColor === "light") return "#ffffff";
   if (!onPhoto || typeof ctx.getImageData !== "function") return "#262626";
@@ -278,7 +277,7 @@ async function drawReference(
     rows.forEach(([label, value], index) => {
       const height = heights[index] * factor;
       copy(label, pad, y + w * 0.012, inner * 0.22, Math.max(1, height - w * 0.02), Math.min(size, w * 0.029),
-        { min: w * 0.017, color: appearance.textColor === "light" ? ink : "#696969" });
+        { min: w * 0.017, color: appearance.textColor === "light" || isCustomTextColor(appearance.textColor) ? ink : "#696969" });
       copy(value, valueX, y + w * 0.012, valueWidth, Math.max(1, height - w * 0.02), size,
         { min: w * 0.019, leading: 1.3, color: ink });
       y += height;

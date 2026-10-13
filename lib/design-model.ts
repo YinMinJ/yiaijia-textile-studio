@@ -1,7 +1,9 @@
+import type { CustomTextColor } from "./text-color.ts";
+
 export type TemplateId = "vip" | "warm" | "clean" | "editorial";
 export type ProductCategory = "quilt" | "bedding-set";
 export type TextPosition = "auto" | "top-right" | "top-left" | "bottom-right" | "bottom-left";
-export type TextColor = "auto" | "dark" | "light";
+export type TextColor = "auto" | "dark" | "light" | CustomTextColor;
 export type ModuleSection =
   | "hero"
   | "benefits"

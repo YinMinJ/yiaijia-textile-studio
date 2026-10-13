@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, CheckCheck, ChevronRight, Download, ImagePlus, Layers, LoaderCircle, Pencil, Plus, RotateCcw, Save, Sparkles, UploadCloud, X } from "@lucide/vue";
 import { categoryFor, categories, dimensions, modulePurpose, moduleSection, needsAI, sourceAsset, referenceAssets, templates, usesSecondary, type Asset, type AssetRole, type DesignModule, type ProductCategory, type ProductInfo, type TemplateId } from "../../lib/design-model";
 import { buildPhotographyPlan } from "../../lib/product-photography";
+import { isCustomTextColor } from "../../lib/text-color";
 import type { StudioContext } from "../useStudio";
 import CanvasPreview from "./CanvasPreview.vue";
 
@@ -35,7 +36,15 @@ const textColors = [
   { value: "auto", label: "自动对比" },
   { value: "dark", label: "深色文字" },
   { value: "light", label: "白色文字" },
+  { value: "custom", label: "自定义颜色" },
 ] as const;
+const textColorMode = computed(() => isCustomTextColor(activeModule.value?.textColor) ? "custom" : activeModule.value?.textColor || "auto");
+const customTextColor = computed(() => isCustomTextColor(activeModule.value?.textColor) ? activeModule.value.textColor : "#262626");
+const colorDraft = ref("#262626");
+const colorError = computed(() => textColorMode.value === "custom" && !isCustomTextColor(colorDraft.value) ? "请输入完整色值，例如 #A76645；当前颜色已保留。" : "");
+watch(() => [activeModule.value?.id, activeModule.value?.textColor], () => {
+  colorDraft.value = customTextColor.value;
+}, { immediate: true });
 const copyResult = computed(() => s.copyResult.value?.projectId === p.value?.id ? s.copyResult.value : null);
 const completed = computed(() => p.value?.workflow === "complete" || (!p.value?.workflow && p.value?.status === "ready"));
 const unfinished = computed(() => p.value?.generation === "ai" && p.value.modules.some(m => needsAI(p.value!, m) && m.aiStatus !== "succeeded"));
@@ -76,6 +85,17 @@ function localEdit(key: keyof DesignModule, event: Event) {
   if (busy.value) return;
   const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
   s.updateModule({ [key]: key === "cropX" || key === "cropY" || key === "imageZoom" ? Number(target.value) : target.value });
+}
+function selectTextColor(event: Event) {
+  if (busy.value) return;
+  const value = (event.target as HTMLSelectElement).value;
+  if (value === "custom") s.updateModule({ textColor: activeModule.value?.textColor === "light" ? "#FFFFFF" : "#262626" });
+  else if (value === "auto" || value === "dark" || value === "light") s.updateModule({ textColor: value });
+}
+function editTextColor(event: Event) {
+  if (busy.value) return;
+  colorDraft.value = (event.target as HTMLInputElement).value.trim().toUpperCase();
+  if (isCustomTextColor(colorDraft.value)) s.updateModule({ textColor: colorDraft.value });
 }
 function selectStyle(id: TemplateId) {
   if (busy.value) return;
@@ -213,7 +233,15 @@ onBeforeUnmount(() => { editDialog.value?.close(); sourceDialog.value?.close(); 
               <label class="field">主标题<textarea :value="activeModule.title" rows="2" maxlength="40" placeholder="建议 1–2 行，回车可手动换行" @input="localEdit('title', $event)" /><small>建议 1–2 行短标题，回车可手动换行。</small></label>
               <label class="field">补充说明<textarea :value="activeModule.subtitle" rows="3" maxlength="100" @input="localEdit('subtitle', $event)" /></label>
               <label v-if="!factsOnly(activeModule)" class="field">画面编排<select :value="activeModule.composition || 'auto'" @change="localEdit('composition', $event)"><option v-for="composition in compositions" :key="composition.value" :value="composition.value">{{ composition.label }}</option></select><small>{{ compositions.find(composition => composition.value === (activeModule!.composition || 'auto'))?.hint }}。切换后立即预览，已有照片继续使用。</small></label>
-              <div v-if="!factsOnly(activeModule)" class="field-pair"><label class="field">文案位置<select :value="activeModule.textPosition || 'auto'" @change="localEdit('textPosition', $event)"><option v-for="position in textPositions" :key="position.value" :value="position.value">{{ position.label }}</option></select></label><label class="field">文案颜色<select :value="activeModule.textColor || 'auto'" @change="localEdit('textColor', $event)"><option v-for="color in textColors" :key="color.value" :value="color.value">{{ color.label }}</option></select></label></div>
+              <div class="field-pair"><label v-if="!factsOnly(activeModule)" class="field">文案位置<select :value="activeModule.textPosition || 'auto'" @change="localEdit('textPosition', $event)"><option v-for="position in textPositions" :key="position.value" :value="position.value">{{ position.label }}</option></select></label><label class="field">文案颜色<select :value="textColorMode" @change="selectTextColor"><option v-for="color in textColors" :key="color.value" :value="color.value">{{ color.label }}</option></select></label></div>
+              <div v-if="textColorMode === 'custom'" class="field custom-copy-color">
+                <label for="copy-color-hex">自定义色值</label>
+                <div class="copy-color-controls">
+                  <input type="color" :value="customTextColor" aria-label="选择文案颜色" @input="editTextColor" />
+                  <input id="copy-color-hex" type="text" :value="colorDraft" maxlength="7" placeholder="#A76645" autocomplete="off" spellcheck="false" :aria-invalid="!!colorError" aria-describedby="copy-color-hint" @input="editTextColor" />
+                </div>
+                <small id="copy-color-hint" :class="{ 'color-error': colorError }" :role="colorError ? 'alert' : undefined">{{ colorError || '点击色块选色，也可输入色值。此图文案同步变色，预览与导出一致。' }}</small>
+              </div>
               <p v-if="!factsOnly(activeModule)" class="field-footnote">文字直接叠在图片上，无底色；选择留白位置更清晰。</p>
               <label v-if="!factsOnly(activeModule)" class="field">主图片<select :value="activeModule.imageId" @change="localEdit('imageId', $event)"><option v-for="asset in p.assets.filter(a => !a.generated || a.id === activeModule!.imageId)" :key="asset.id" :value="asset.id">{{ asset.name }}{{ asset.generated ? ' · AI 素材' : '' }}</option></select></label>
               <label v-if="usesSecondary(activeModule)" class="field">{{ secondaryLabel(activeModule) }}<select :value="activeModule.imageId2" @change="localEdit('imageId2', $event)"><option value="">暂不使用</option><option v-for="asset in originalAssets" :key="asset.id" :value="asset.id">{{ asset.name }}</option></select></label>
@@ -261,4 +289,5 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}button:disabled{
 /* Style choices show the same unboxed photo overlay used in exports. */
 .style-card .style-art{padding:0;aspect-ratio:1;position:relative;overflow:hidden}.style-card .style-art img{position:absolute;inset:0;width:100%;height:100%;aspect-ratio:auto;object-fit:cover;border-radius:0}.style-card .style-brand{position:absolute;z-index:1;top:13px;left:13px;margin:0;font-size:8px;letter-spacing:.5px}.style-card .style-art strong{position:absolute;z-index:1;top:32px;right:16px;max-width:80%;margin:0;font-size:21px;line-height:1.4;text-align:right;letter-spacing:0;font-weight:700}.style-card .style-art small{position:absolute;z-index:1;bottom:12px;right:13px;max-width:85%;margin:0;font-size:9px;line-height:1.6;text-align:right;opacity:.75}
 @media(max-width:560px){.style-card .style-art strong{top:28px;right:11px;font-size:15px}.style-card .style-brand{top:10px;left:10px;font-size:6px}.style-card .style-art small{font-size:7px;bottom:9px;right:10px}}
+.copy-color-controls{display:flex;align-items:center;gap:10px}.field .copy-color-controls input[type=color]{width:48px;height:44px;flex:none;padding:5px;cursor:pointer}.field .copy-color-controls input[type=text]{min-width:0;font-family:ui-monospace,monospace;letter-spacing:.6px}.field .copy-color-controls input[aria-invalid=true]{border-color:#c8664e}.custom-copy-color small.color-error{color:#b44c35}
 </style>

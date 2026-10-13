@@ -7,11 +7,12 @@ import { sampleProject } from "../lib/design-model.ts";
 // Exercise actual drawing commands; browser proofs cover the real rounded font.
 const source = (await readFile(new URL("../lib/design-renderer.ts", import.meta.url), "utf8"))
   .replace('"./design-model"', JSON.stringify(new URL("../lib/design-model.ts", import.meta.url).href))
-  .replace('"./app-path"', JSON.stringify(new URL("../lib/app-path.ts", import.meta.url).href));
+  .replace('"./app-path"', JSON.stringify(new URL("../lib/app-path.ts", import.meta.url).href))
+  .replace('"./text-color.ts"', JSON.stringify(new URL("../lib/text-color.ts", import.meta.url).href));
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
 });
-const { drawDesign } = await import("data:text/javascript;base64," + Buffer.from(outputText).toString("base64"));
+const { drawDesign, renderBlob } = await import("data:text/javascript;base64," + Buffer.from(outputText).toString("base64"));
 
 function recordingCanvas({ pixelTone, blockedPixels = false } = {}) {
   const rectangles = [], texts = [], images = [], events = [];
@@ -49,7 +50,10 @@ function recordingCanvas({ pixelTone, blockedPixels = false } = {}) {
     for (let i = 0; i < pixels.length; i += 4) { pixels[i] = pixels[i + 1] = pixels[i + 2] = pixelTone; pixels[i + 3] = 255; }
     return { data: pixels };
   };
-  return { width: 0, height: 0, getContext: () => ctx, rectangles, texts, images, events };
+  return {
+    width: 0, height: 0, getContext: () => ctx, rectangles, texts, images, events,
+    toBlob(callback, type) { callback(new Blob(["recorded export"], { type })); },
+  };
 }
 
 async function renderModule({
@@ -59,7 +63,7 @@ async function renderModule({
   category = "quilt", template = "vip", info = {},
   imageZoom, cropX = 50, cropY = 50, textPosition, textColor,
   pixelTone, blockedPixels = false, legacy = false, index,
-  assetNames, assetRoles,
+  assetNames, assetRoles, exportImage = false,
 } = {}) {
   const previousDocument = globalThis.document, previousImage = globalThis.Image;
   globalThis.document = { fonts: { load: async () => [] } };
@@ -83,9 +87,16 @@ async function renderModule({
     if (legacy) delete module.section;
     const before = structuredClone({ project, module });
     const canvas = recordingCanvas({ pixelTone, blockedPixels });
-    await drawDesign(canvas, project, module);
+    let blob;
+    if (exportImage) {
+      globalThis.document.createElement = tag => {
+        assert.equal(tag, "canvas");
+        return canvas;
+      };
+      blob = await renderBlob(project, module);
+    } else await drawDesign(canvas, project, module);
     assert.deepEqual({ project, module }, before, "rendering preserves saved copy, crops and references");
-    return { canvas, project, module };
+    return { canvas, project, module, blob };
   } finally {
     if (previousDocument === undefined) delete globalThis.document; else globalThis.document = previousDocument;
     if (previousImage === undefined) delete globalThis.Image; else globalThis.Image = previousImage;
@@ -163,6 +174,26 @@ test("automatic contrast reads the actual photo and gracefully falls back when p
     const result = await renderModule({ section: "hero", textColor, pixelTone: textColor === "dark" ? 0 : 255 });
     assert.ok(result.canvas.texts.every(line => line.color === expected));
     assertNoCopyBacking(result.canvas);
+  }
+});
+
+test("custom colors apply to photo copy, grid captions and specification rows in preview and JPEG export", async () => {
+  for (const kind of ["main", "detail"]) for (const section of ["hero", "colors", "components", "specs"]) {
+    const options = {
+      kind, section, textColor: "#a76645", second: true, blockedPixels: true,
+      category: "bedding-set", info: { colors: "奶油白、淡粉色", material: "用户确认的棉面料" },
+      assetNames: ["奶油白实拍", "淡粉色实拍"], assetRoles: ["被套", "枕套"],
+    };
+    const preview = await renderModule(options);
+    assert.ok(preview.canvas.texts.length >= 2);
+    assert.ok(preview.canvas.texts.every(line => line.color === "#A76645"), `${kind}/${section}: all copy uses the chosen color`);
+    if (section === "colors") assert.ok(preview.canvas.texts.some(line => line.value === "淡粉色"));
+    if (section === "components") assert.ok(preview.canvas.texts.some(line => line.value === "枕套"));
+    if (section === "specs") assert.ok(preview.canvas.texts.some(line => line.value === "面料成分"));
+    assertInsideCanvas(preview.canvas); assertNoCopyBacking(preview.canvas);
+    const exported = await renderModule({ ...options, exportImage: true });
+    assert.equal(exported.blob.type, "image/jpeg");
+    assert.deepEqual(exported.canvas.texts, preview.canvas.texts, "JPEG export keeps exactly the preview's copy and colors");
   }
 });
 
